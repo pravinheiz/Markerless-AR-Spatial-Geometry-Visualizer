@@ -3,63 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Spatial Geometry Visualizer</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Markerless AR Spatial Geometry Visualizer</title>
     
-    <!-- Import Map for Three.js -->
+    <!-- Import Map for Three.js (No build tool needed) -->
     <script type="importmap">
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
             }
         }
     </script>
+
+    <!-- MediaPipe Tasks Vision via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Video Input -->
-    <video id="input-video" autoplay playsinline muted></video>
-    
-    <!-- Canvas for Hand Overlay -->
-    <canvas id="output-canvas"></canvas>
 
-    <!-- Three.js Canvas -->
+    <!-- LAYER 0: Webcam Feed (Background) -->
+    <video id="webcam-video" autoplay playsinline muted></video>
+
+    <!-- LAYER 1: Three.js 3D Scene (Transparent) -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- HUD -->
-    <div id="hud">
-        <div class="panel">
-            <h2>Spatial Geometry AR</h2>
-            <div class="stat-row">
-                <span class="label">Mode:</span>
-                <span id="mode-display" class="value">INIT</span>
-            </div>
-            <div class="stat-row">
-                <span class="label">Gesture:</span>
-                <span id="gesture-display" class="value">NONE</span>
-            </div>
-            <div class="stat-row">
-                <span class="label">Shape:</span>
-                <span id="shape-display" class="value">-</span>
-            </div>
-            <div class="instructions">
-                <h3>Gestures</h3>
-                <ul>
-                    <li>👌 <strong>Pinch & Drag:</strong> Draw Shape</li>
-                    <li>🖐️ <strong>Release:</strong> Confirm</li>
-                    <li>✌️ <strong>Two Hands:</strong> Extrude/Zoom</li>
-                    <li>🔄 <strong>Circle Motion:</strong> Create Torus</li>
-                </ul>
-            </div>
+    <!-- LAYER 2: Hand Skeleton Overlay (Top) -->
+    <canvas id="hand-canvas"></canvas>
+
+    <!-- UI / HUD OVERLAY -->
+    <div id="ui-layer">
+        <!-- Top Left: Gesture State -->
+        <div class="panel top-left">
+            <h1>AR Geometry Visualizer</h1>
+            <div class="status-indicator" id="gesture-status">INITIALIZING...</div>
+            <div class="sub-status" id="mode-status">Mode: IDLE</div>
         </div>
+
+        <!-- Top Right: Controls Info -->
+        <div class="panel top-right">
+            <h3>Gesture Guide</h3>
+            <ul>
+                <li><span class="key">Pinch</span> Select / Draw</li>
+                <li><span class="key">Grab</span> Move / Rotate</li>
+                <li><span class="key">2-Hand Spread</span> Zoom</li>
+                <li><span class="key">2-Hand Vertical</span> Extrude</li>
+                <li><span class="key">Fist (1s)</span> Undo</li>
+            </ul>
+        </div>
+
+        <!-- Bottom Left: Toggles -->
+        <div class="panel bottom-left">
+            <button id="toggle-skeleton">Hide Skeleton</button>
+            <button id="reset-scene">Reset Scene</button>
+        </div>
+
+        <!-- Bottom Right: Debug Stats -->
+        <div class="panel bottom-right">
+            <div>FPS: <span id="fps-counter">0</span></div>
+            <div>Confidence: <span id="conf-bar">0%</span></div>
+            <div class="bar-container"><div id="conf-fill"></div></div>
+        </div>
+
+        <!-- Center Crosshair (Dynamic) -->
+        <div id="crosshair" class="hidden">+</div>
+        
+        <!-- Prompt Overlay -->
+        <div id="prompt-overlay" class="hidden">PINCH TO SELECT</div>
     </div>
 
     <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="spinner"></div>
-        <p id="loading-text">Loading Spatial Models...</p>
-        <button id="start-camera-btn" style="display:none; margin-top:20px; padding:10px 20px; background:#00ff88; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Enable Camera</button>
+        <h2>Loading Spatial Models...</h2>
+        <p>Please allow camera access when prompted.</p>
+        <button id="enable-camera-btn" style="display:none; margin-top:20px; padding:10px 20px; background:#00ff88; border:none; cursor:pointer; font-weight:bold;">Enable Camera</button>
     </div>
 
     <script type="module" src="main.js"></script>
