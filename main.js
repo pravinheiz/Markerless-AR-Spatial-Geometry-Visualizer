@@ -1,241 +1,513 @@
 import * as THREE from 'three';
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-// --- CONFIGURATION ---
+/**
+ * CONFIGURATION CONSTANTS
+ * Tuned for stability and responsiveness
+ */
 const CONFIG = {
-    smoothing: 0.6,
-    pinchStart: 0.05,
-    pinchEnd: 0.08,
-    planeY: 0
+    SMOOTHING_ALPHA: 0.3,       // Exponential smoothing factor
+    MIN_CONFIDENCE: 0.5,        // Minimum landmark confidence
+    PINCH_THRESHOLD: 0.05,      // Distance for pinch detection
+    GRAB_THRESHOLD: 0.15,       // Average finger curl for grab
+    EXTRUSION_SENSITIVITY: 0.003,
+    ZOOM_SENSITIVITY: 0.002,
+    COLORS: {
+        LEFT_HAND: 0x007AFF,    // Apple Blue
+        RIGHT_HAND: 0x34C759,   // Apple Green
+        PINCH_ACTIVE: 0xFF9500, // Apple Orange
+        GRAB_ACTIVE: 0xFF3B30,  // Apple Red
+        OBJECT_SELECTED: 0x00FF88,
+        OBJECT_GRABBED: 0xFFFFFF
+    }
 };
 
-// --- STATE ---
+/**
+ * GLOBAL STATE MANAGEMENT
+ * Tracks application mode, gestures, and object references
+ */
 const STATE = {
-    mode: 'IDLE', // IDLE, DRAWING, CONFIRMED, EXTRUDING
-    gesture: 'NONE',
-    isPinching: false,
-    handCount: 0,
-    landmarks: null,
-    smoothedLandmarks: null,
-    startPoint: null,
-    currentPoint: null,
-    activeMesh: null,
-    shapeType: 'box', // box, cylinder, torus, octahedron
-    trail: [] // For motion trails
+    mode: 'IDLE',           // IDLE, DRAWING, MANIPULATING, EXTRUDING, ZOOMING
+    gesture: 'NONE',        // NONE, PINCH, GRAB, OPEN_PALM, FIST, TWO_HAND
+    hands: [],              // Current frame hand data
+    smoothedLandmarks: [],  // History for smoothing
+    objects: [],            // Array of created 3D objects
+    selectedObject: null,   // Currently grabbed object
+    startPoint: null,       // Start point for drawing/extrusion
+    initialTwoHandDist: 0,  // Reference distance for zoom
+    fistStartTime: 0,       // Timestamp for fist hold (undo)
+    showSkeleton: true,
+    fps: 0
 };
 
-// --- DOM ---
-const video = document.getElementById('input-video');
-const canvas = document.getElementById('output-canvas');
-const ctx = canvas.getContext('2d');
-const glCanvas = document.getElementById('webgl-canvas');
-const uiMode = document.getElementById('mode-display');
-const uiGesture = document.getElementById('gesture-display');
-const uiShape = document.getElementById('shape-display');
+// DOM Elements
+const videoElement = document.getElementById('webcam-video');
+const handCanvas = document.getElementById('hand-canvas');
+const handCtx = handCanvas.getContext('2d');
+const webglCanvas = document.getElementById('webgl-canvas');
 const loadingScreen = document.getElementById('loading-screen');
-const loadingText = document.getElementById('loading-text');
-const startBtn = document.getElementById('start-camera-btn');
+const enableBtn = document.getElementById('enable-camera-btn');
+const uiGesture = document.getElementById('gesture-status');
+const uiMode = document.getElementById('mode-status');
+const uiConf = document.getElementById('conf-fill');
+const uiConfText = document.getElementById('conf-bar');
+const crosshair = document.getElementById('crosshair');
+const promptOverlay = document.getElementById('prompt-overlay');
 
-// --- THREE.JS GLOBALS ---
+// Three.js Globals
 let scene, camera, renderer, raycaster, constructionPlane;
-let handGroup, fingerJoints = [];
+let clock = new THREE.Clock();
 
-// --- INITIALIZATION ---
+/**
+ * SECTION 1: MEDIAPIPE SETUP & HAND TRACKING
+ * Initializes the HandLandmarker from MediaPipe Tasks Vision
+ */
 let handLandmarker = undefined;
 let lastVideoTime = -1;
 
-async function init() {
-    initThreeJS();
-    
-    // 1. Load MediaPipe Models using Modern Tasks Vision
-    loadingText.innerText = "Loading Neural Models...";
-    
-    try {
-        const vision = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-        );
-        
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
-            baseOptions: {
-                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                delegate: "GPU"
-            },
-            runningMode: "VIDEO",
-            numHands: 2
-        });
+async function initMediaPipe() {
+    const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+    );
 
-        loadingText.innerText = "Models Ready. Please Allow Camera.";
-        startBtn.style.display = "block";
-        
-        startBtn.addEventListener('click', async () => {
-            try {
-                await startCamera();
-                loadingScreen.style.opacity = 0;
-                setTimeout(() => loadingScreen.style.display = 'none', 500);
-                detectFrame();
-            } catch (e) {
-                alert("Camera access denied: " + e.message);
-            }
-        });
-
-    } catch (error) {
-        console.error(error);
-        loadingText.innerText = "Error loading models. Check console.";
-    }
-}
-
-function startCamera() {
-    return navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720, facingMode: 'user' }
-    }).then(stream => {
-        video.srcObject = stream;
-        return new Promise((resolve) => {
-            video.onloadedmetadata = () => {
-                video.play();
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                resolve();
-            };
-        });
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+            delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 2
     });
+
+    console.log("MediaPipe Hand Landmarker loaded successfully.");
+    loadingScreen.querySelector('h2').innerText = "Camera Required";
+    loadingScreen.querySelector('p').innerText = "Click below to start the AR experience.";
+    enableBtn.style.display = 'block';
 }
 
-// --- MAIN LOOP ---
-function detectFrame() {
-    if (video.readyState < 2) {
-        requestAnimationFrame(detectFrame);
-        return;
-    }
-
-    const startTimeMs = performance.now();
-    
-    if (handLandmarker && video.currentTime !== lastVideoTime) {
-        lastVideoTime = video.currentTime;
-        const results = handLandmarker.detectForVideo(video, startTimeMs);
-        processResults(results);
-    }
-    
-    renderThreeJS();
-    requestAnimationFrame(detectFrame);
-}
-
-// --- GESTURE & MATH LOGIC ---
-function processResults(results) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    STATE.handCount = results.landmarks.length;
-    STATE.landmarks = results.landmarks[0] || null;
-    
-    let detectedGesture = 'NONE';
-    let pinchDist = 1.0;
-
-    if (STATE.landmarks) {
-        // 1. Smoothing
-        const raw = STATE.landmarks;
-        if (!STATE.smoothedLandmarks) STATE.smoothedLandmarks = raw;
+enableBtn.addEventListener('click', async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+        });
+        videoElement.srcObject = stream;
+        videoElement.play();
         
-        for (let i = 0; i < 21; i++) {
-            STATE.smoothedLandmarks[i] = {
-                x: CONFIG.smoothing * raw[i].x + (1 - CONFIG.smoothing) * STATE.smoothedLandmarks[i].x,
-                y: CONFIG.smoothing * raw[i].y + (1 - CONFIG.smoothing) * STATE.smoothedLandmarks[i].y,
-                z: CONFIG.smoothing * raw[i].z + (1 - CONFIG.smoothing) * STATE.smoothedLandmarks[i].z
+        // Wait for video to be ready
+        videoElement.onloadeddata = () => {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => loadingScreen.style.display = 'none', 500);
+            resizeCanvases();
+            animate();
+        };
+    } catch (err) {
+        alert("Camera access denied. Please allow camera permissions to use AR features.");
+        console.error(err);
+    }
+});
+
+function resizeCanvases() {
+    handCanvas.width = window.innerWidth;
+    handCanvas.height = window.innerHeight;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+}
+
+window.addEventListener('resize', resizeCanvases);
+
+/**
+ * SECTION 2: ONE EURO FILTER & SMOOTHING
+ * Adaptive smoothing to reduce jitter while maintaining low latency
+ */
+class OneEuroFilter {
+    constructor(freq, minCutoff = 1.0, beta = 0.0, dCutoff = 1.0) {
+        this.freq = freq;
+        this.minCutoff = minCutoff;
+        this.beta = beta;
+        this.dCutoff = dCutoff;
+        this.x = null;
+        this.dx = null;
+        this.lastTime = null;
+    }
+
+    filter(value, timestamp) {
+        if (this.lastTime === null) {
+            this.lastTime = timestamp;
+            this.x = value;
+            this.dx = 0;
+            return value;
+        }
+
+        const te = (timestamp - this.lastTime) / 1000.0;
+        if (te <= 0) return value; // Prevent division by zero
+
+        const freq = 1.0 / te;
+        const mdx = this.alpha(this.dCutoff, freq);
+        const dx = (value - this.x) / te;
+        const edx = this.smooth(dx, this.dx, mdx);
+        
+        const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+        const alpha = this.alpha(cutoff, freq);
+        
+        this.x = this.smooth(value, this.x, alpha);
+        this.dx = edx;
+        this.lastTime = timestamp;
+        
+        return this.x;
+    }
+
+    alpha(cutoff, freq) {
+        const te = 1.0 / freq;
+        const tau = 1.0 / (2 * Math.PI * cutoff);
+        return 1.0 / (1.0 + tau / te);
+    }
+
+    smooth(value, prev, alpha) {
+        return alpha * value + (1.0 - alpha) * prev;
+    }
+}
+
+// Initialize filters for each landmark of each hand
+const filters = []; 
+
+/**
+ * SECTION 3: GESTURE RECOGNITION LOGIC
+ * Deterministic rule-based analysis of landmarks
+ */
+function detectGestures(results) {
+    STATE.hands = results.landmarks;
+    STATE.gesture = 'NONE';
+    let avgConfidence = 0;
+
+    if (STATE.hands.length === 0) {
+        STATE.mode = 'IDLE';
+        STATE.selectedObject = null;
+        return 0;
+    }
+
+    // Process each hand
+    STATE.hands.forEach((landmarks, handIndex) => {
+        // Apply Filtering
+        if (!filters[handIndex]) filters[handIndex] = Array(21).fill(null).map(() => new OneEuroFilter(30, 2.0, 0.1));
+        
+        const smoothed = landmarks.map((lm, i) => {
+            const ts = performance.now();
+            return {
+                x: filters[handIndex][i].filter(lm.x, ts),
+                y: filters[handIndex][i].filter(lm.y, ts),
+                z: filters[handIndex][i].filter(lm.z, ts),
+                visibility: lm.visibility || 1.0
             };
+        });
+        
+        STATE.smoothedLandmarks[handIndex] = smoothed;
+        avgConfidence += smoothed.reduce((acc, lm) => acc + lm.visibility, 0) / 21;
+
+        // Calculate Distances
+        const thumbTip = smoothed[4];
+        const indexTip = smoothed[8];
+        const middleTip = smoothed[12];
+        const ringTip = smoothed[16];
+        const pinkyTip = smoothed[20];
+        const wrist = smoothed[0];
+
+        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+        
+        // Check Finger Extension (Simple dot product or distance check could be used, here using tip-to-wrist distance)
+        const isFingerExtended = (tip, wrist, pip) => {
+            const distWristTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+            const distWristPip = Math.hypot(pip.x - wrist.x, pip.y - wrist.y);
+            return distWristTip > distWristPip * 1.2; // Tip is further than PIP joint
+        };
+
+        const fingersExtended = [
+            isFingerExtended(indexTip, wrist, smoothed[6]),
+            isFingerExtended(middleTip, wrist, smoothed[10]),
+            isFingerExtended(ringTip, wrist, smoothed[14]),
+            isFingerExtended(pinkyTip, wrist, smoothed[18])
+        ].filter(Boolean).length;
+
+        // State Logic
+        if (pinchDist < CONFIG.PINCH_THRESHOLD) {
+            STATE.gesture = 'PINCH';
+            if (STATE.mode === 'IDLE') STATE.mode = 'SELECTING';
+        } else if (fingersExtended === 0 && pinchDist > 0.1) {
+            // Fist detected
+            if (STATE.fistStartTime === 0) STATE.fistStartTime = Date.now();
+            else if (Date.now() - STATE.fistStartTime > 1000) {
+                STATE.gesture = 'FIST_HOLD';
+                undoLastAction();
+                STATE.fistStartTime = 0; // Reset after trigger
+            }
+        } else {
+            STATE.fistStartTime = 0;
+            if (fingersExtended === 4) STATE.gesture = 'OPEN_PALM';
+            else STATE.gesture = 'GRAB'; // Partial curl
         }
 
-        const lm = STATE.smoothedLandmarks;
-        
-        // 2. Draw "Apple Vision Pro" Style Hand
-        drawNeuralHand(lm);
-
-        // 3. Pinch Detection (Thumb tip #4, Index tip #8)
-        const thumbTip = lm[4];
-        const indexTip = lm[8];
-        pinchDist = Math.sqrt(
-            Math.pow(thumbTip.x - indexTip.x, 2) + 
-            Math.pow(thumbTip.y - indexTip.y, 2)
-        );
-        
-        STATE.pinchDist = pinchDist;
-
-        if (pinchDist < CONFIG.pinchStart) STATE.isPinching = true;
-        else if (pinchDist > CONFIG.pinchEnd) STATE.isPinching = false;
-
-        if (STATE.isPinching) detectedGesture = 'PINCH';
-        
-        // 4. Two Hand Logic
-        if (results.landmarks.length > 1) {
-            detectedGesture = 'TWO_HANDS';
-            const lm2 = results.landmarks[1]; // Second hand (less smoothed for responsiveness)
-            const distHands = Math.abs(lm[8].y - lm2[8].y);
+        // Two Hand Logic
+        if (STATE.hands.length === 2) {
+            const h1 = STATE.smoothedLandmarks[0][0]; // Wrist 1
+            const h2 = STATE.smoothedLandmarks[1][0]; // Wrist 2
+            const dist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
             
-            if (distHands > 0.2) handleExtrusion(distHands);
-            else handleZoom(Math.abs(lm[8].x - lm2[8].x));
-        }
-
-        // 5. Interaction State Machine
-        if (detectedGesture === 'PINCH' && !STATE.activeMesh) {
-            STATE.mode = 'DRAWING';
-            const pt = getRaycastPoint(indexTip);
-            if (pt) {
-                STATE.startPoint = pt;
-                STATE.currentPoint = pt;
-                determineShapeType(lm); // Creative shape selection
-                createMesh();
+            if (STATE.gesture === 'PINCH' && STATE.smoothedLandmarks[1][4] && Math.hypot(STATE.smoothedLandmarks[1][4].x - STATE.smoothedLandmarks[1][8].x, STATE.smoothedLandmarks[1][4].y - STATE.smoothedLandmarks[1][8].y) < CONFIG.PINCH_THRESHOLD) {
+                STATE.gesture = 'TWO_HAND_PINCH';
+                
+                // Vertical Separation -> Extrude
+                if (Math.abs(h1.y - h2.y) > 0.2) {
+                    STATE.mode = 'EXTRUDING';
+                    handleExtrusion(Math.abs(h1.y - h2.y));
+                } 
+                // Horizontal Spread -> Zoom
+                else {
+                    STATE.mode = 'ZOOMING';
+                    handleZoom(dist);
+                }
             }
-        } else if (STATE.mode === 'DRAWING' && STATE.isPinching) {
-            const pt = getRaycastPoint(indexTip);
-            if (pt) {
-                STATE.currentPoint = pt;
-                updateMesh();
-                // Add to trail
-                STATE.trail.push(pt.clone());
-                if (STATE.trail.length > 20) STATE.trail.shift();
-            }
-        } else if (STATE.mode === 'DRAWING' && !STATE.isPinching) {
-            STATE.mode = 'CONFIRMED';
-            finalizeMesh();
         }
-    } else {
-        STATE.isPinching = false;
-        STATE.smoothedLandmarks = null;
-        if (STATE.mode === 'DRAWING') STATE.mode = 'IDLE';
-    }
+    });
 
-    // Update HUD
-    uiMode.innerText = STATE.mode;
-    uiGesture.innerText = detectedGesture;
-    uiShape.innerText = STATE.shapeType.toUpperCase();
-    
-    // Color coding
-    uiMode.style.color = STATE.mode === 'DRAWING' ? '#ffaa00' : '#00ff88';
+    return avgConfidence / STATE.hands.length;
 }
 
-function determineShapeType(lm) {
-    // Creative Logic: Detect rough circular motion or hand orientation
-    // For now, randomize or based on pinch height for demo variety
-    const types = ['box', 'cylinder', 'torus', 'octahedron'];
-    // Simple heuristic: Use Z-depth of hand to pick shape
-    const z = lm[8].z; 
-    if (z < -0.05) STATE.shapeType = 'torus';
-    else if (z > 0.05) STATE.shapeType = 'octahedron';
-    else STATE.shapeType = Math.random() > 0.5 ? 'box' : 'cylinder';
+/**
+ * SECTION 4: THREE.JS SCENE INITIALIZATION
+ * Sets up the transparent 3D world over the video
+ */
+function initThreeJS() {
+    scene = new THREE.Scene();
+    // No background color set, alpha is true in renderer to see video
+
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 2, 6); // Elevated view
+    camera.lookAt(0, 0, 0);
+
+    renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, alpha: true, antialias: true });
+    renderer.setClearColor(0x000000, 0); // Transparent clear color
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(5, 10, 5);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    const pointLight = new THREE.PointLight(0x00ff88, 0.5);
+    pointLight.position.set(0, 5, 0);
+    scene.add(pointLight);
+
+    // Construction Plane (Grid)
+    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    gridHelper.position.y = 0.01; // Slightly above 0 to avoid z-fighting
+    scene.add(gridHelper);
+
+    // Invisible Raycast Plane
+    const planeGeo = new THREE.PlaneGeometry(100, 100);
+    const planeMat = new THREE.MeshBasicMaterial({ visible: false });
+    constructionPlane = new THREE.Mesh(planeGeo, planeMat);
+    constructionPlane.rotation.x = -Math.PI / 2;
+    scene.add(constructionPlane);
+
+    raycaster = new THREE.Raycaster();
 }
 
+/**
+ * SECTION 5: RAYCASTING & 3D MAPPING
+ * Maps 2D screen coordinates (from hand) to 3D world space
+ */
 function getRaycastPoint(landmark) {
-    // Convert Normalized Landmark to NDC
-    const ndcX = -(landmark.x * 2 - 1);
-    const ndcY = -(landmark.y * 2 - 1);
+    if (!landmark) return null;
+
+    // Convert MediaPipe coords (0-1, top-left origin) to NDC (-1 to 1, center origin)
+    // Note: Video is mirrored via CSS, but coords are standard. We must mirror X manually for logic consistency if needed, 
+    // but since CSS mirrors the canvas too, visual alignment is automatic. 
+    // However, for Raycasting, we need normalized device coordinates relative to the WebGL canvas.
     
+    const ndcX = -(landmark.x * 2 - 1); 
+    const ndcY = -(landmark.y * 2 - 1);
+
     const mouse = new THREE.Vector2(ndcX, ndcY);
     raycaster.setFromCamera(mouse, camera);
-    
+
     const intersects = raycaster.intersectObject(constructionPlane);
-    return intersects.length > 0 ? intersects[0].point : null;
+    if (intersects.length > 0) {
+        return intersects[0].point;
+    }
+    return null;
 }
 
-// --- VISUALIZATION (NEURAL HAND) ---
-function drawNeuralHand(lm) {
-    // Draw connections manually on 2D canvas for "Stick" look
+/**
+ * SECTION 6: 3D MANIPULATION & INTERACTION
+ */
+function handleInteraction() {
+    const primaryHand = STATE.smoothedLandmarks[0];
+    if (!primaryHand) return;
+
+    const indexTip = primaryHand[8];
+    const worldPoint = getRaycastPoint(indexTip);
+
+    // Update Crosshair
+    if (worldPoint && STATE.showSkeleton) {
+        crosshair.classList.remove('hidden');
+        // Project 3D point to 2D screen for crosshair positioning
+        const vec = worldPoint.clone();
+        vec.project(camera);
+        const x = (vec.x * .5 + .5) * window.innerWidth;
+        const y = (-(vec.y * .5) + .5) * window.innerHeight;
+        crosshair.style.left = `${x}px`;
+        crosshair.style.top = `${y}px`;
+    } else {
+        crosshair.classList.add('hidden');
+    }
+
+    // Logic based on Gesture
+    if (STATE.gesture === 'PINCH') {
+        promptOverlay.classList.remove('hidden');
+        
+        if (STATE.mode === 'SELECTING' && worldPoint) {
+            // Start Drawing or Selecting
+            STATE.startPoint = worldPoint;
+            STATE.mode = 'DRAWING';
+            createShapePreview();
+        } else if (STATE.mode === 'DRAWING' && worldPoint) {
+            updateShapePreview(worldPoint);
+        }
+    } else {
+        promptOverlay.classList.add('hidden');
+        if (STATE.mode === 'DRAWING' && !STATE.gesture.includes('PINCH')) {
+            // Release Pinch -> Confirm
+            finalizeShape();
+            STATE.mode = 'IDLE';
+            STATE.startPoint = null;
+        }
+    }
+
+    // Object Manipulation (Grab)
+    if (STATE.gesture === 'GRAB' || STATE.gesture === 'TWO_HAND_PINCH') {
+        // Simple proximity selection for demo
+        // In a full app, we'd raycast against objects
+    }
+}
+
+function createShapePreview() {
+    if (STATE.selectedObject) scene.remove(STATE.selectedObject);
+    
+    const geometry = new THREE.RingGeometry(0.05, 0.08, 32);
+    const material = new THREE.MeshBasicMaterial({ color: CONFIG.COLORS.PINCH_ACTIVE, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    STATE.selectedObject = new THREE.Mesh(geometry, material);
+    STATE.selectedObject.rotation.x = -Math.PI / 2;
+    STATE.selectedObject.position.copy(STATE.startPoint);
+    scene.add(STATE.selectedObject);
+}
+
+function updateShapePreview(currentPoint) {
+    if (!STATE.selectedObject || !STATE.startPoint) return;
+
+    // Remove old preview mesh, create new shape based on drag
+    scene.remove(STATE.selectedObject);
+
+    const width = Math.abs(currentPoint.x - STATE.startPoint.x);
+    const depth = Math.abs(currentPoint.z - STATE.startPoint.z);
+    const centerX = (STATE.startPoint.x + currentPoint.x) / 2;
+    const centerZ = (STATE.startPoint.z + currentPoint.z) / 2;
+
+    // Creative Shape: Dynamic Box based on aspect ratio
+    let geometry;
+    if (width > depth * 1.5) geometry = new THREE.BoxGeometry(width, 0.1, 0.2); // Plank
+    else if (depth > width * 1.5) geometry = new THREE.BoxGeometry(0.2, 0.1, depth); // Beam
+    else geometry = new THREE.BoxGeometry(width, 0.1, depth); // Plate
+
+    const material = new THREE.MeshStandardMaterial({ 
+        color: CONFIG.COLORS.OBJECT_SELECTED, 
+        roughness: 0.4, 
+        metalness: 0.1,
+        transparent: true, 
+        opacity: 0.6 
+    });
+
+    STATE.selectedObject = new THREE.Mesh(geometry, material);
+    STATE.selectedObject.position.set(centerX, 0.05, centerZ);
+    STATE.selectedObject.castShadow = true;
+    scene.add(STATE.selectedObject);
+}
+
+function finalizeShape() {
+    if (STATE.selectedObject) {
+        STATE.selectedObject.material.opacity = 1.0;
+        STATE.selectedObject.material.color.setHex(CONFIG.COLORS.LEFT_HAND);
+        STATE.objects.push(STATE.selectedObject);
+        STATE.selectedObject = null;
+    }
+}
+
+function handleExtrusion(separation) {
+    if (!STATE.objects.length) return;
+    const lastObj = STATE.objects[STATE.objects.length - 1];
+    
+    // Scale Y based on separation
+    const targetScale = 1 + (separation * 5);
+    lastObj.scale.y = THREE.MathUtils.lerp(lastObj.scale.y, targetScale, 0.1);
+    lastObj.position.y = lastObj.scale.y / 2; // Keep on floor
+    
+    // Change material to indicate 3D
+    lastObj.material.color.setHex(CONFIG.COLORS.RIGHT_HAND);
+    lastObj.material.roughness = 0.2;
+}
+
+function handleZoom(dist) {
+    if (STATE.initialTwoHandDist === 0) STATE.initialTwoHandDist = dist;
+    
+    const scale = dist / STATE.initialTwoHandDist;
+    const targetFOV = 45 / scale;
+    camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 0.05);
+    camera.updateProjectionMatrix();
+}
+
+function undoLastAction() {
+    if (STATE.objects.length > 0) {
+        const obj = STATE.objects.pop();
+        scene.remove(obj);
+        obj.geometry.dispose();
+        obj.material.dispose();
+        console.log("Undo performed");
+    }
+}
+
+document.getElementById('reset-scene').addEventListener('click', () => {
+    STATE.objects.forEach(obj => {
+        scene.remove(obj);
+        obj.geometry.dispose();
+        obj.material.dispose();
+    });
+    STATE.objects = [];
+    STATE.selectedObject = null;
+});
+
+document.getElementById('toggle-skeleton').addEventListener('click', (e) => {
+    STATE.showSkeleton = !STATE.showSkeleton;
+    e.target.innerText = STATE.showSkeleton ? "Hide Skeleton" : "Show Skeleton";
+});
+
+/**
+ * SECTION 7: HAND SKELETON RENDERER (2D CANVAS)
+ * Draws the "Apple Vision Pro" style skeletal overlay
+ */
+function drawHandSkeleton(landmarks, handedness) {
+    if (!STATE.showSkeleton) return;
+
+    const color = handedness === 'Left' ? CONFIG.COLORS.LEFT_HAND : CONFIG.COLORS.RIGHT_HAND;
+    const hexColor = new THREE.Color(color);
+    
+    handCtx.lineWidth = 2;
+    handCtx.lineCap = 'round';
+    handCtx.lineJoin = 'round';
+
+    // Draw Bones
     const connections = [
         [0,1], [1,2], [2,3], [3,4], // Thumb
         [0,5], [5,6], [6,7], [7,8], // Index
@@ -245,163 +517,98 @@ function drawNeuralHand(lm) {
         [5,9], [9,13], [13,17] // Palm
     ];
 
-    ctx.lineWidth = 2;
-    
-    // Draw Lines (Glowing Sticks)
+    handCtx.beginPath();
     connections.forEach(([i, j]) => {
-        const p1 = lm[i];
-        const p2 = lm[j];
+        const p1 = landmarks[i];
+        const p2 = landmarks[j];
+        // Map to screen coords (considering CSS mirror)
+        const x1 = p1.x * window.innerWidth;
+        const y1 = p1.y * window.innerHeight;
+        const x2 = p2.x * window.innerWidth;
+        const y2 = p2.y * window.innerHeight;
         
-        ctx.beginPath();
-        ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
-        ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+        handCtx.moveTo(x1, y1);
+        handCtx.lineTo(x2, y2);
+    });
+    
+    handCtx.strokeStyle = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, 0.6)`;
+    handCtx.stroke();
+
+    // Draw Joints (Glowing Dots)
+    landmarks.forEach((lm, i) => {
+        const x = lm.x * window.innerWidth;
+        const y = lm.y * window.innerHeight;
+        const radius = (i === 4 || i === 8) ? 6 : 4; // Highlight Thumb/Index tips
         
-        if (STATE.isPinching && (i===4 || j===4 || i===8 || j===8)) {
-            ctx.strokeStyle = '#ff0088'; // Pink when pinching
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#ff0088';
-        } else {
-            ctx.strokeStyle = '#00ff88';
-            ctx.shadowBlur = 5;
-            ctx.shadowColor = '#00ff88';
+        handCtx.beginPath();
+        handCtx.arc(x, y, radius, 0, 2 * Math.PI);
+        handCtx.fillStyle = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, ${lm.visibility})`;
+        handCtx.fill();
+        
+        // Glow effect
+        handCtx.shadowBlur = 10;
+        handCtx.shadowColor = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, 0.8)`;
+        handCtx.stroke();
+        handCtx.shadowBlur = 0;
+    });
+}
+
+/**
+ * SECTION 8: UI UPDATES
+ */
+function updateUI(confidence) {
+    uiGesture.innerText = STATE.gesture.replace('_', ' ');
+    uiMode.innerText = `Mode: ${STATE.mode}`;
+    
+    // Color coding status
+    if (STATE.gesture === 'PINCH') uiGesture.style.color = '#FF9500';
+    else if (STATE.gesture === 'GRAB') uiGesture.style.color = '#FF3B30';
+    else uiGesture.style.color = '#34C759';
+
+    const confPct = Math.round(confidence * 100);
+    uiConf.style.width = `${confPct}%`;
+    uiConfText.innerText = `${confPct}%`;
+    uiConf.style.background = confPct > 0.7 ? '#34C759' : '#FF9500';
+}
+
+/**
+ * SECTION 9: ANIMATION LOOP
+ * Main entry point for rendering and logic
+ */
+function animate() {
+    requestAnimationFrame(animate);
+
+    const now = performance.now();
+    const delta = clock.getDelta();
+    STATE.fps = Math.round(1 / delta);
+    document.getElementById('fps-counter').innerText = STATE.fps;
+
+    if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+        if (now - lastVideoTime >= 1000 / 30) { // Limit to 30fps for MP
+            lastVideoTime = now;
+            
+            if (handLandmarker) {
+                const results = handLandmarker.detectForVideo(videoElement, now);
+                const confidence = detectGestures(results);
+                
+                // Clear Hand Canvas
+                handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+                
+                // Draw Skeletons
+                results.landmarks.forEach((lm, idx) => {
+                    const handedness = results.handednesses[idx]?.categoryName || 'Right';
+                    drawHandSkeleton(lm, handedness);
+                });
+
+                handleInteraction();
+                updateUI(confidence);
+            }
         }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-    });
-
-    // Draw Joints (Nodes)
-    lm.forEach((p, i) => {
-        ctx.beginPath();
-        ctx.arc(p.x * canvas.width, p.y * canvas.height, i < 5 ? 4 : 3, 0, 2 * Math.PI);
-        ctx.fillStyle = i === 8 ? '#ffffff' : '#00ff88'; // Highlight index tip
-        ctx.fill();
-    });
-}
-
-// --- SHAPE CREATION ---
-function createMesh() {
-    if (STATE.activeMesh) scene.remove(STATE.activeMesh);
-
-    let geo;
-    const mat = new THREE.MeshStandardMaterial({ 
-        color: 0x0088ff, 
-        roughness: 0.2, 
-        metalness: 0.5,
-        transparent: true, 
-        opacity: 0.6,
-        side: THREE.DoubleSide
-    });
-
-    switch(STATE.shapeType) {
-        case 'box': geo = new THREE.BoxGeometry(0.1, 0.1, 0.1); break;
-        case 'cylinder': geo = new THREE.CylinderGeometry(0.05, 0.05, 0.1, 16); break;
-        case 'torus': geo = new THREE.TorusGeometry(0.05, 0.02, 8, 16); break;
-        case 'octahedron': geo = new THREE.OctahedronGeometry(0.06); break;
     }
 
-    STATE.activeMesh = new THREE.Mesh(geo, mat);
-    scene.add(STATE.activeMesh);
-}
-
-function updateMesh() {
-    if (!STATE.activeMesh || !STATE.startPoint || !STATE.currentPoint) return;
-
-    const dx = Math.abs(STATE.currentPoint.x - STATE.startPoint.x);
-    const dz = Math.abs(STATE.currentPoint.z - STATE.startPoint.z);
-    const cx = (STATE.startPoint.x + STATE.currentPoint.x) / 2;
-    const cz = (STATE.startPoint.z + STATE.currentPoint.z) / 2;
-
-    STATE.activeMesh.position.set(cx, CONFIG.planeY, cz);
-
-    if (STATE.shapeType === 'box' || STATE.shapeType === 'cylinder') {
-        STATE.activeMesh.scale.set(dx * 10, 1, dz * 10);
-    } else if (STATE.shapeType === 'torus') {
-        const scale = Math.max(dx, dz) * 5;
-        STATE.activeMesh.scale.set(scale, scale, scale);
-    } else if (STATE.shapeType === 'octahedron') {
-        STATE.activeMesh.scale.set(dx * 10, dz * 10, dx * 10);
-    }
-}
-
-function finalizeMesh() {
-    if (STATE.activeMesh) {
-        STATE.activeMesh.material.opacity = 0.9;
-        STATE.activeMesh.material.color.setHex(0x00ff88);
-        STATE.activeMesh = null; // Reset reference to allow new shape
-    }
-}
-
-function handleExtrusion(separation) {
-    if (!STATE.activeMesh && scene.children.some(c => c.isMesh && c !== constructionPlane)) {
-        // Find the last added mesh that isn't the plane
-        const meshes = scene.children.filter(c => c.isMesh && c !== constructionPlane);
-        const target = meshes[meshes.length - 1];
-        
-        STATE.mode = 'EXTRUDING';
-        const height = separation * 4;
-        
-        // Simple scaling extrusion for demo
-        target.scale.y = height;
-        target.position.y = height / 2;
-        target.material.color.setHex(0xff0088);
-    }
-}
-
-function handleZoom(separation) {
-    const targetZ = 8 - (separation * 10);
-    camera.position.z += (targetZ - camera.position.z) * 0.1;
-}
-
-// --- THREE.JS SETUP ---
-function initThreeJS() {
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
-    scene.fog = new THREE.Fog(0x111111, 5, 20);
-
-    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 4, 6);
-    camera.lookAt(0, 0, 0);
-
-    renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true;
-
-    // Lights
-    const amb = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(amb);
-    const dir = new THREE.DirectionalLight(0xffffff, 1);
-    dir.position.set(5, 10, 5);
-    dir.castShadow = true;
-    scene.add(dir);
-
-    // Grid
-    const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
-    scene.add(grid);
-
-    // Invisible Plane for Raycasting
-    const planeGeo = new THREE.PlaneGeometry(100, 100);
-    const planeMat = new THREE.MeshBasicMaterial({ visible: false });
-    constructionPlane = new THREE.Mesh(planeGeo, planeMat);
-    constructionPlane.rotation.x = -Math.PI / 2;
-    scene.add(constructionPlane);
-
-    raycaster = new THREE.Raycaster();
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-}
-
-function renderThreeJS() {
-    // Draw Motion Trail in 3D
-    if (STATE.trail.length > 1) {
-        // Could add a LineLoop here for 3D trail visualization
-    }
     renderer.render(scene, camera);
 }
 
-// Start
-init();
+// Bootstrap
+initMediaPipe();
+initThreeJS();
