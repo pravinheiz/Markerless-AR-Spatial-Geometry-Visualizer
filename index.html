@@ -3,61 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spatial Geometry Visualizer | AVP Style</title>
+    <title>AR Spatial Geometry Visualizer</title>
     <link rel="stylesheet" href="style.css">
     
+    <!-- Import Map for Three.js -->
     <script type="importmap">
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
             }
         }
     </script>
-
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
-
-    <video id="input-video" style="display:none;" playsinline></video>
+    <!-- Video Input -->
+    <video id="input-video" autoplay playsinline muted></video>
+    
+    <!-- Canvas for Hand Overlay -->
     <canvas id="output-canvas"></canvas>
+
+    <!-- Three.js Canvas -->
     <canvas id="webgl-canvas"></canvas>
 
+    <!-- HUD -->
     <div id="hud">
         <div class="panel">
             <h2>Spatial Geometry AR</h2>
             <div class="stat-row">
                 <span class="label">Mode:</span>
-                <span id="mode-display" class="value">IDLE</span>
-            </div>
-            <div class="stat-row">
-                <span class="label">Shape:</span>
-                <span id="shape-display" class="value">PYRAMID</span>
+                <span id="mode-display" class="value">INIT</span>
             </div>
             <div class="stat-row">
                 <span class="label">Gesture:</span>
                 <span id="gesture-display" class="value">NONE</span>
             </div>
+            <div class="stat-row">
+                <span class="label">Shape:</span>
+                <span id="shape-display" class="value">-</span>
+            </div>
             <div class="instructions">
                 <h3>Gestures</h3>
                 <ul>
-                    <li><strong>PINCH + DRAG:</strong> Draw Shape</li>
-                    <li><strong>CIRCLE MOTION:</strong> Switch to Torus</li>
-                    <li><strong>FAST FLICK:</strong> Switch to Octahedron</li>
-                    <li><strong>TWO HANDS UP:</strong> Extrude 3D</li>
-                    <li><strong>TWO HANDS APART:</strong> Zoom Camera</li>
+                    <li>👌 <strong>Pinch & Drag:</strong> Draw Shape</li>
+                    <li>🖐️ <strong>Release:</strong> Confirm</li>
+                    <li>✌️ <strong>Two Hands:</strong> Extrude/Zoom</li>
+                    <li>🔄 <strong>Circle Motion:</strong> Create Torus</li>
                 </ul>
             </div>
         </div>
     </div>
 
+    <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="spinner"></div>
-        <p>Loading Spatial Models...</p>
+        <p id="loading-text">Loading Spatial Models...</p>
         <button id="start-camera-btn" style="display:none; margin-top:20px; padding:10px 20px; background:#00ff88; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">Enable Camera</button>
     </div>
 
