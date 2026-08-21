@@ -1,15 +1,13 @@
 :root {
     --primary-color: #00ff88;
+    --active-color: #00ccff;
+    --grab-color: #ffaa00;
     --bg-panel: rgba(10, 15, 30, 0.85);
     --text-color: #ffffff;
     --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
     overflow: hidden;
@@ -18,53 +16,41 @@ body {
     color: var(--text-color);
 }
 
-/* Layering Context */
-#input-video {
-    position: absolute;
-    top: 0;
-    left: 0;
-    visibility: hidden; /* Hidden from view, used for processing */
-}
+#input-video { position: absolute; top: 0; left: 0; visibility: hidden; }
 
 #output-canvas {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     object-fit: cover;
-    transform: scaleX(-1); /* Mirror effect for webcam */
+    transform: scaleX(-1); /* Mirror */
     z-index: 1;
-    opacity: 0.4; /* Dimmed to focus on 3D */
+    opacity: 0.5; /* Slightly dimmed to make 3D pop */
 }
 
 #webgl-canvas {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     z-index: 2;
     touch-action: none;
 }
 
-/* HUD Styling */
 #hud {
     position: absolute;
-    top: 20px;
-    left: 20px;
+    top: 20px; left: 20px;
     z-index: 10;
-    pointer-events: none; /* Let clicks pass through to canvas if needed */
+    pointer-events: none;
 }
 
 .panel {
     background: var(--bg-panel);
-    backdrop-filter: blur(10px);
+    backdrop-filter: blur(12px);
     padding: 20px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    max-width: 300px;
+    max-width: 320px;
     pointer-events: auto;
 }
 
@@ -74,23 +60,20 @@ h2 {
     color: var(--primary-color);
     text-transform: uppercase;
     letter-spacing: 1px;
+    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
 }
 
 .stat-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 8px;
-    font-size: 0.9rem;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    padding-bottom: 4px;
 }
 
-.label {
-    color: #aaa;
-}
-
-.value {
-    font-weight: bold;
-    color: #fff;
-}
+.label { color: #aaa; }
+.value { font-weight: bold; color: #fff; font-family: monospace; font-size: 1rem; }
 
 .instructions {
     margin-top: 20px;
@@ -101,23 +84,16 @@ h2 {
 .instructions h3 {
     font-size: 0.9rem;
     margin-bottom: 10px;
-    color: var(--primary-color);
+    color: var(--active-color);
 }
 
-.instructions ul {
-    list-style: none;
-    font-size: 0.8rem;
-    line-height: 1.6;
-    color: #ccc;
-}
+.instructions ul { list-style: none; font-size: 0.85rem; line-height: 1.8; color: #ccc; }
+.highlight { color: var(--grab-color); font-weight: bold; }
 
-/* Loading Screen */
 #loading-screen {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     background: #000;
     z-index: 100;
     display: flex;
@@ -128,20 +104,14 @@ h2 {
 }
 
 .spinner {
-    width: 50px;
-    height: 50px;
+    width: 60px; height: 60px;
     border: 4px solid rgba(255, 255, 255, 0.1);
     border-left-color: var(--primary-color);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin-bottom: 20px;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
 }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-.hidden {
-    opacity: 0;
-    pointer-events: none;
-}
+@keyframes spin { to { transform: rotate(360deg); } }
+.hidden { opacity: 0; pointer-events: none; }
