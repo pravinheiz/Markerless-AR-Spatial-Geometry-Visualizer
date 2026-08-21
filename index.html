@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markerless AR Spatial Geometry Visualizer</title>
+    <title>AR Spatial Geometry Visualizer</title>
     
-    <!-- Import Map for Three.js (No build tool needed) -->
+    <!-- Import Map for Three.js -->
     <script type="importmap">
         {
             "imports": {
@@ -15,69 +15,64 @@
         }
     </script>
 
-    <!-- MediaPipe Tasks Vision via CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+    <!-- ROBUST MEDIAPIPE LEGACY CDN (No WASM fetching issues) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- LAYER 0: Webcam Feed (Background) -->
+    <!-- LAYER 0: Webcam -->
     <video id="webcam-video" autoplay playsinline muted></video>
 
-    <!-- LAYER 1: Three.js 3D Scene (Transparent) -->
+    <!-- LAYER 1: Three.js Scene -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- LAYER 2: Hand Skeleton Overlay (Top) -->
+    <!-- LAYER 2: Hand Skeleton Overlay -->
     <canvas id="hand-canvas"></canvas>
 
-    <!-- UI / HUD OVERLAY -->
+    <!-- UI Overlay -->
     <div id="ui-layer">
-        <!-- Top Left: Gesture State -->
         <div class="panel top-left">
             <h1>AR Geometry Visualizer</h1>
             <div class="status-indicator" id="gesture-status">INITIALIZING...</div>
             <div class="sub-status" id="mode-status">Mode: IDLE</div>
         </div>
 
-        <!-- Top Right: Controls Info -->
         <div class="panel top-right">
             <h3>Gesture Guide</h3>
             <ul>
-                <li><span class="key">Pinch</span> Select / Draw</li>
-                <li><span class="key">Grab</span> Move / Rotate</li>
-                <li><span class="key">2-Hand Spread</span> Zoom</li>
-                <li><span class="key">2-Hand Vertical</span> Extrude</li>
+                <li><span class="key">Pinch</span> Draw / Select</li>
+                <li><span class="key">Grab</span> Move Object</li>
+                <li><span class="key">2-Hand Split</span> Extrude 3D</li>
                 <li><span class="key">Fist (1s)</span> Undo</li>
             </ul>
         </div>
 
-        <!-- Bottom Left: Toggles -->
         <div class="panel bottom-left">
             <button id="toggle-skeleton">Hide Skeleton</button>
             <button id="reset-scene">Reset Scene</button>
         </div>
 
-        <!-- Bottom Right: Debug Stats -->
         <div class="panel bottom-right">
             <div>FPS: <span id="fps-counter">0</span></div>
-            <div>Confidence: <span id="conf-bar">0%</span></div>
+            <div>Conf: <span id="conf-bar">0%</span></div>
             <div class="bar-container"><div id="conf-fill"></div></div>
         </div>
 
-        <!-- Center Crosshair (Dynamic) -->
         <div id="crosshair" class="hidden">+</div>
-        
-        <!-- Prompt Overlay -->
-        <div id="prompt-overlay" class="hidden">PINCH TO SELECT</div>
+        <div id="prompt-overlay" class="hidden">PINCH TO DRAW</div>
     </div>
 
     <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="spinner"></div>
-        <h2>Loading Spatial Models...</h2>
-        <p>Please allow camera access when prompted.</p>
-        <button id="enable-camera-btn" style="display:none; margin-top:20px; padding:10px 20px; background:#00ff88; border:none; cursor:pointer; font-weight:bold;">Enable Camera</button>
+        <h2>Loading Hand Tracking...</h2>
+        <p id="loading-msg">Initializing models...</p>
+        <button id="start-btn" style="display:none; margin-top:15px; padding:10px 20px; background:#00ff88; border:none; color:#000; font-weight:bold; cursor:pointer;">START CAMERA</button>
     </div>
 
     <script type="module" src="main.js"></script>
