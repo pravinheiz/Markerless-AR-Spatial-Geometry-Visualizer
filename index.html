@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markerless AR Spatial Geometry Visualizer</title>
+    <title>AR Spatial Geometry Visualizer</title>
     <link rel="stylesheet" href="style.css">
     
-    <!-- Import Map for Three.js (No build tool needed) -->
+    <!-- Import Map for Three.js -->
     <script type="importmap">
         {
             "imports": {
@@ -16,7 +16,7 @@
         }
     </script>
 
-    <!-- MediaPipe Hands via CDN -->
+    <!-- MediaPipe Hands -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -24,16 +24,10 @@
 </head>
 <body>
 
-    <!-- Video Input (Hidden but active for MediaPipe) -->
     <video id="input-video" style="display:none;"></video>
-    
-    <!-- Canvas for Hand Landmarks Overlay -->
     <canvas id="output-canvas"></canvas>
-
-    <!-- Three.js Rendering Canvas -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- HUD Overlay -->
     <div id="hud">
         <div class="panel">
             <h2>AR Geometry Visualizer</h2>
@@ -49,26 +43,22 @@
                 <span class="label">Pinch Dist:</span>
                 <span id="pinch-display" class="value">0.00</span>
             </div>
-            <div class="stat-row">
-                <span class="label">Hands:</span>
-                <span id="hands-display" class="value">0</span>
-            </div>
             <div class="instructions">
                 <h3>Controls</h3>
                 <ul>
-                    <li><strong>PINCH + DRAG:</strong> Draw 2D Shape</li>
-                    <li><strong>RELEASE:</strong> Confirm Shape</li>
-                    <li><strong>TWO HANDS UP/DOWN:</strong> Extrude to 3D</li>
-                    <li><strong>TWO HANDS APART:</strong> Zoom / Scale</li>
+                    <li><span class="highlight">PINCH</span> (Thumb+Index): Grab / Draw</li>
+                    <li><span class="highlight">DRAG</span>: Move Cursor / Resize Shape</li>
+                    <li><span class="highlight">TWO HANDS Vertical</span>: Extrude 3D</li>
+                    <li><span class="highlight">TWO HANDS Horizontal</span>: Zoom Camera</li>
                 </ul>
             </div>
         </div>
     </div>
 
-    <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="spinner"></div>
         <p>Loading Computer Vision Models...</p>
+        <p style="font-size: 0.8rem; color: #aaa; margin-top: 10px;">Allow Camera Access to Continue</p>
     </div>
 
     <script type="module" src="main.js"></script>
