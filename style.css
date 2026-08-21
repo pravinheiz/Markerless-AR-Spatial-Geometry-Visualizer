@@ -115,3 +115,18 @@ h2 {
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .hidden { opacity: 0; pointer-events: none; }
+#start-camera-btn {
+    background: #00ff88 !important;
+    color: #000 !important;
+    border: none;
+    padding: 12px 24px;
+    font-size: 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: transform 0.2s;
+}
+#start-camera-btn:hover {
+    transform: scale(1.05);
+    background: #00cc6a !important;
+}
