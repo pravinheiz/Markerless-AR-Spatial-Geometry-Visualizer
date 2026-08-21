@@ -1,73 +1,169 @@
 :root {
-    --primary: #00ff88;
-    --secondary: #0088ff;
-    --accent: #ff0088;
-    --bg-panel: rgba(10, 10, 15, 0.85);
+    --avp-blue: #007AFF;
+    --avp-green: #34C759;
+    --avp-orange: #FF9500;
+    --avp-red: #FF3B30;
+    --glass-bg: rgba(20, 20, 25, 0.65);
+    --glass-border: rgba(255, 255, 255, 0.15);
+    --text-main: #FFFFFF;
+    --text-dim: #A1A1A6;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
 
 body {
     overflow: hidden;
-    background: #050505;
-    font-family: 'Segoe UI', sans-serif;
-    color: white;
+    background-color: #000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text-main);
 }
 
-/* Layers */
-#input-video {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
+/* LAYERING SYSTEM */
+#webcam-video {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
     object-fit: cover;
-    transform: scaleX(-1); /* Mirror */
-    opacity: 0.5; /* Dimmed for AR feel */
-    z-index: 1;
-}
-
-#output-canvas {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
-    transform: scaleX(-1);
-    z-index: 2;
-    pointer-events: none;
+    transform: scaleX(-1); /* Mirror effect */
+    z-index: 0;
+    opacity: 0.4; /* See-through AR effect */
 }
 
 #webgl-canvas {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
-    z-index: 3;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 1;
+    outline: none;
 }
 
-/* HUD */
-#hud {
-    position: absolute; top: 20px; left: 20px;
+#hand-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 2;
+    pointer-events: none; /* Let clicks pass through to UI if needed */
+    transform: scaleX(-1); /* Mirror to match video */
+}
+
+#ui-layer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
     z-index: 10;
+    pointer-events: none; /* Allow interaction with 3D scene if needed */
+}
+
+/* PANELS */
+.panel {
+    position: absolute;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    padding: 16px;
+    pointer-events: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    max-width: 280px;
+}
+
+.top-left { top: 20px; left: 20px; }
+.top-right { top: 20px; right: 20px; text-align: right; }
+.bottom-left { bottom: 20px; left: 20px; display: flex; gap: 10px; }
+.bottom-right { bottom: 20px; right: 20px; text-align: right; min-width: 150px; }
+
+h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.5px; }
+h3 { font-size: 0.9rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+
+.status-indicator {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--avp-green);
+    text-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
+}
+
+.sub-status { font-size: 0.9rem; color: var(--text-dim); margin-top: 4px; }
+
+ul { list-style: none; text-align: left; font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; }
+.key {
+    display: inline-block;
+    background: rgba(255,255,255,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text-main);
+    font-weight: 600;
+    margin-right: 6px;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--glass-border);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+button:hover { background: rgba(255, 255, 255, 0.2); }
+
+/* Stats Bar */
+.bar-container {
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+#conf-fill {
+    width: 0%;
+    height: 100%;
+    background: var(--avp-green);
+    transition: width 0.2s, background 0.2s;
+}
+
+/* Crosshair & Prompts */
+#crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 24px;
+    color: var(--avp-green);
+    text-shadow: 0 0 8px var(--avp-green);
     pointer-events: none;
 }
 
-.panel {
-    background: var(--bg-panel);
-    backdrop-filter: blur(12px);
-    padding: 20px;
-    border-radius: 16px;
-    border: 1px solid rgba(255,255,255,0.1);
-    width: 280px;
-    pointer-events: auto;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+#prompt-overlay {
+    position: absolute;
+    top: 60%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.6);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    border: 1px solid var(--avp-green);
+    color: var(--avp-green);
+    animation: pulse 1.5s infinite;
 }
 
-h2 { color: var(--primary); font-size: 1.1rem; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 1px; }
-.stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9rem; }
-.label { color: #aaa; }
-.value { font-weight: bold; color: #fff; }
+.hidden { display: none !important; }
 
-.instructions { margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }
-.instructions h3 { color: var(--secondary); font-size: 0.85rem; margin-bottom: 8px; }
-.instructions ul { list-style: none; font-size: 0.8rem; color: #ccc; line-height: 1.6; }
+@keyframes pulse {
+    0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.95); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+    100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.95); }
+}
 
-/* Loading */
+/* Loading Screen */
 #loading-screen {
-    position: fixed; inset: 0;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
     background: #000;
     z-index: 100;
     display: flex;
@@ -76,25 +172,12 @@ h2 { color: var(--primary); font-size: 1.1rem; margin-bottom: 15px; text-transfo
     align-items: center;
     transition: opacity 0.5s;
 }
-
 .spinner {
     width: 40px; height: 40px;
-    border: 3px solid rgba(255,255,255,0.1);
-    border-top-color: var(--primary);
+    border: 4px solid rgba(255,255,255,0.1);
+    border-top: 4px solid var(--avp-green);
     border-radius: 50%;
     animation: spin 1s linear infinite;
+    margin-bottom: 20px;
 }
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-#start-camera-btn {
-    background: var(--primary);
-    color: #000;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 30px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: transform 0.2s;
-}
-#start-camera-btn:hover { transform: scale(1.05); }
+@keyframes spin { 100% { transform: rotate(360deg); } }
