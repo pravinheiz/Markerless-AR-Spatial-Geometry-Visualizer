@@ -1,31 +1,32 @@
 :root {
     --primary-color: #00ff88;
-    --active-color: #00ccff;
-    --grab-color: #ffaa00;
-    --bg-panel: rgba(10, 15, 30, 0.85);
+    --secondary-color: #00ccff;
+    --accent-color: #ff0055;
+    --bg-panel: rgba(10, 10, 15, 0.75);
     --text-color: #ffffff;
-    --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
     overflow: hidden;
-    background-color: #050505;
+    background-color: #000;
     font-family: var(--font-main);
     color: var(--text-color);
 }
 
-#input-video { position: absolute; top: 0; left: 0; visibility: hidden; }
+#input-video { display: none; }
 
 #output-canvas {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
     object-fit: cover;
-    transform: scaleX(-1); /* Mirror */
+    transform: scaleX(-1);
     z-index: 1;
-    opacity: 0.5; /* Slightly dimmed to make 3D pop */
+    opacity: 0.3; /* Dimmer to highlight 3D elements */
+    filter: contrast(1.2) brightness(0.8);
 }
 
 #webgl-canvas {
@@ -45,35 +46,39 @@ body {
 
 .panel {
     background: var(--bg-panel);
-    backdrop-filter: blur(12px);
-    padding: 20px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 25px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
     max-width: 320px;
     pointer-events: auto;
+    transition: all 0.3s ease;
 }
 
 h2 {
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     margin-bottom: 15px;
-    color: var(--primary-color);
+    background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    letter-spacing: 1.5px;
+    font-weight: 700;
 }
 
 .stat-row {
     display: flex;
     justify-content: space-between;
     margin-bottom: 10px;
-    font-size: 0.95rem;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    padding-bottom: 4px;
+    font-size: 0.85rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 5px;
 }
 
-.label { color: #aaa; }
-.value { font-weight: bold; color: #fff; font-family: monospace; font-size: 1rem; }
+.label { color: #aaa; font-weight: 500; }
+.value { font-weight: 700; color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.3); }
 
 .instructions {
     margin-top: 20px;
@@ -82,51 +87,62 @@ h2 {
 }
 
 .instructions h3 {
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     margin-bottom: 10px;
-    color: var(--active-color);
+    color: var(--secondary-color);
+    text-transform: uppercase;
 }
 
-.instructions ul { list-style: none; font-size: 0.85rem; line-height: 1.8; color: #ccc; }
-.highlight { color: var(--grab-color); font-weight: bold; }
+.instructions ul {
+    list-style: none;
+    font-size: 0.75rem;
+    line-height: 1.8;
+    color: #ccc;
+}
+
+.instructions li strong { color: #fff; }
 
 #loading-screen {
     position: fixed;
     top: 0; left: 0;
     width: 100%; height: 100%;
-    background: #000;
+    background: radial-gradient(circle at center, #1a1a2e 0%, #000 100%);
     z-index: 100;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    transition: opacity 0.5s ease;
+    transition: opacity 0.8s ease;
 }
 
 .spinner {
     width: 60px; height: 60px;
-    border: 4px solid rgba(255, 255, 255, 0.1);
-    border-left-color: var(--primary-color);
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid var(--primary-color);
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+    animation: spin 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
     margin-bottom: 20px;
-    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
-.hidden { opacity: 0; pointer-events: none; }
+
 #start-camera-btn {
-    background: #00ff88 !important;
-    color: #000 !important;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     border: none;
-    padding: 12px 24px;
-    font-size: 1rem;
-    border-radius: 8px;
-    cursor: pointer;
+    padding: 12px 30px;
+    border-radius: 30px;
+    color: #000;
     font-weight: bold;
-    transition: transform 0.2s;
+    font-size: 1rem;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+    transition: transform 0.2s, box-shadow 0.2s;
 }
+
 #start-camera-btn:hover {
     transform: scale(1.05);
-    background: #00cc6a !important;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.6);
 }
+
+.hidden { opacity: 0; pointer-events: none; }
