@@ -1,33 +1,44 @@
 import * as THREE from 'three';
 
 /**
- * CONFIGURATION
+ * CONFIGURATION CONSTANTS
  */
 const CONFIG = {
     SMOOTHING_ALPHA: 0.3,
+    MIN_CONFIDENCE: 0.5,
     PINCH_THRESHOLD: 0.05,
+    GRAB_THRESHOLD: 0.15,
+    ROTATION_SENSITIVITY: 0.05, // Sensitivity for wrist twist
+    ZOOM_SENSITIVITY: 0.002,
     COLORS: {
-        LEFT: 0x007AFF,
-        RIGHT: 0x34C759,
-        PINCH: 0xFF9500,
-        GRAB: 0xFF3B30
+        LEFT_HAND: 0x007AFF,
+        RIGHT_HAND: 0x34C759,
+        PINCH_ACTIVE: 0xFF9500,
+        GRAB_ACTIVE: 0xFF3B30,
+        OBJECT_SELECTED: 0x00FF88,
+        OBJECT_ROTATING: 0xFFFFFF
     }
 };
 
 /**
- * STATE MANAGEMENT
+ * GLOBAL STATE
  */
 const STATE = {
-    mode: 'IDLE',
+    mode: 'IDLE',           // IDLE, DRAWING, MANIPULATING, ROTATING, ZOOMING, EXTRUDING
     gesture: 'NONE',
     hands: [],
     smoothedLandmarks: [],
     objects: [],
     selectedObject: null,
     startPoint: null,
+    initialTwoHandDist: 0,
+    lastZoomDist: 0,
+    fistStartTime: 0,
     showSkeleton: true,
     fps: 0,
-    fistTimer: 0
+    // For Rotation Logic
+    lastWristAngle: 0,
+    isRotating: false
 };
 
 // DOM Elements
@@ -36,68 +47,65 @@ const handCanvas = document.getElementById('hand-canvas');
 const handCtx = handCanvas.getContext('2d');
 const webglCanvas = document.getElementById('webgl-canvas');
 const loadingScreen = document.getElementById('loading-screen');
-const loadingMsg = document.getElementById('loading-msg');
-const startBtn = document.getElementById('start-btn');
+const enableBtn = document.getElementById('enable-camera-btn');
 const uiGesture = document.getElementById('gesture-status');
 const uiMode = document.getElementById('mode-status');
-const uiConfFill = document.getElementById('conf-fill');
+const uiConf = document.getElementById('conf-fill');
 const uiConfText = document.getElementById('conf-bar');
 const crosshair = document.getElementById('crosshair');
 const promptOverlay = document.getElementById('prompt-overlay');
+const fpsCounter = document.getElementById('fps-counter');
 
 // Three.js Globals
 let scene, camera, renderer, raycaster, constructionPlane;
 let clock = new THREE.Clock();
-let handsMediaPipe = null;
-let filters = [];
 
 /**
- * SECTION 1: MEDIAPIPE INITIALIZATION (LEGACY CDN METHOD)
- * This method is more stable for local files than Tasks Vision
+ * SECTION 1: MEDIAPIPE SETUP (Legacy CDN for Stability)
  */
-function initMediaPipe() {
-    loadingMsg.innerText = "Loading Neural Models...";
-    
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
+let handLandmarker = undefined;
+let lastVideoTime = -1;
 
-    hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
-    });
-
-    hands.onResults(onHandsResults);
-    handsMediaPipe = hands;
-
-    loadingMsg.innerText = "Models Loaded. Ready.";
-    startBtn.style.display = 'block';
+async function initMediaPipe() {
+    try {
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numHands: 2
+        });
+        console.log("MediaPipe Loaded");
+        loadingScreen.querySelector('h2').innerText = "Camera Required";
+        loadingScreen.querySelector('p').innerText = "Click to Enable AR";
+        enableBtn.style.display = 'block';
+    } catch (e) {
+        console.error("MP Load Error:", e);
+        loadingScreen.querySelector('h2').innerText = "Load Error";
+        loadingScreen.querySelector('p').innerText = "Check Internet / AdBlocker";
+        enableBtn.style.display = 'none';
+    }
 }
 
-startBtn.addEventListener('click', async () => {
+enableBtn.addEventListener('click', async () => {
     try {
-        loadingMsg.innerText = "Requesting Camera...";
         const stream = await navigator.mediaDevices.getUserMedia({
             video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
         });
-        
         videoElement.srcObject = stream;
         videoElement.play();
-
         videoElement.onloadeddata = () => {
             loadingScreen.style.opacity = '0';
             setTimeout(() => loadingScreen.style.display = 'none', 500);
             resizeCanvases();
-            
-            // Start detection loop
-            detectFrame();
+            animate();
         };
     } catch (err) {
-        loadingMsg.innerText = "Camera Error: " + err.message;
-        loadingMsg.style.color = "red";
-        console.error(err);
+        alert("Camera access denied.");
     }
 });
 
@@ -108,39 +116,18 @@ function resizeCanvases() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
 }
-
 window.addEventListener('resize', resizeCanvases);
 
 /**
- * SECTION 2: DETECTION LOOP
- */
-async function detectFrame() {
-    if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA && handsMediaPipe) {
-        await handsMediaPipe.send({image: videoElement});
-    }
-    requestAnimationFrame(detectFrame);
-}
-
-/**
- * SECTION 3: ONE EURO FILTER (SMOOTHING)
+ * SECTION 2: ONE EURO FILTER
  */
 class OneEuroFilter {
     constructor(freq, minCutoff = 1.0, beta = 0.0, dCutoff = 1.0) {
-        this.freq = freq;
-        this.minCutoff = minCutoff;
-        this.beta = beta;
-        this.dCutoff = dCutoff;
-        this.x = null;
-        this.dx = null;
-        this.lastTime = null;
+        this.freq = freq; this.minCutoff = minCutoff; this.beta = beta; this.dCutoff = dCutoff;
+        this.x = null; this.dx = null; this.lastTime = null;
     }
     filter(value, timestamp) {
-        if (this.lastTime === null) {
-            this.lastTime = timestamp;
-            this.x = value;
-            this.dx = 0;
-            return value;
-        }
+        if (this.lastTime === null) { this.lastTime = timestamp; this.x = value; this.dx = 0; return value; }
         const te = (timestamp - this.lastTime) / 1000.0;
         if (te <= 0) return value;
         const freq = 1.0 / te;
@@ -159,118 +146,145 @@ class OneEuroFilter {
         const tau = 1.0 / (2 * Math.PI * cutoff);
         return 1.0 / (1.0 + tau / te);
     }
-    smooth(value, prev, alpha) {
-        return alpha * value + (1.0 - alpha) * prev;
-    }
+    smooth(value, prev, alpha) { return alpha * value + (1.0 - alpha) * prev; }
 }
+const filters = [];
 
 /**
- * SECTION 4: HAND RESULTS PROCESSING
+ * SECTION 3: GESTURE & MATH LOGIC
  */
-function onHandsResults(results) {
-    STATE.hands = results.multiHandLandmarks;
+function detectGestures(results) {
+    STATE.hands = results.landmarks;
     STATE.gesture = 'NONE';
-    let avgConf = 0;
+    let avgConfidence = 0;
 
     if (STATE.hands.length === 0) {
         STATE.mode = 'IDLE';
+        STATE.isRotating = false;
         STATE.selectedObject = null;
-        handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
         return 0;
     }
 
-    handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
-
-    STATE.hands.forEach((landmarks, idx) => {
-        // Smoothing
-        if (!filters[idx]) filters[idx] = Array(21).fill(null).map(() => new OneEuroFilter(30, 2.0, 0.1));
-        const smoothed = landmarks.map((lm, i) => ({
-            x: filters[idx][i].filter(lm.x, performance.now()),
-            y: filters[idx][i].filter(lm.y, performance.now()),
-            z: filters[idx][i].filter(lm.z, performance.now()),
-            visibility: lm.visibility || 1.0
-        }));
-        STATE.smoothedLandmarks[idx] = smoothed;
-        avgConf += smoothed.reduce((a, b) => a + b.visibility, 0) / 21;
-
-        // Draw Skeleton
-        drawSkeleton(smoothed, idx === 0 ? 'Left' : 'Right');
-
-        // Gesture Logic
-        const thumb = smoothed[4];
-        const index = smoothed[8];
-        const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+    STATE.hands.forEach((landmarks, handIndex) => {
+        if (!filters[handIndex]) filters[handIndex] = Array(21).fill(null).map(() => new OneEuroFilter(30, 2.0, 0.1));
         
-        if (dist < CONFIG.PINCH_THRESHOLD) {
+        const smoothed = landmarks.map((lm, i) => {
+            const ts = performance.now();
+            return {
+                x: filters[handIndex][i].filter(lm.x, ts),
+                y: filters[handIndex][i].filter(lm.y, ts),
+                z: filters[handIndex][i].filter(lm.z, ts),
+                visibility: lm.visibility || 1.0
+            };
+        });
+        STATE.smoothedLandmarks[handIndex] = smoothed;
+        avgConfidence += smoothed.reduce((acc, lm) => acc + lm.visibility, 0) / 21;
+
+        const thumbTip = smoothed[4];
+        const indexTip = smoothed[8];
+        const middleTip = smoothed[12];
+        const ringTip = smoothed[16];
+        const pinkyTip = smoothed[20];
+        const wrist = smoothed[0];
+
+        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+        
+        // Check Finger Extension
+        const isFingerExtended = (tip, wrist, pip) => {
+            return Math.hypot(tip.x - wrist.x, tip.y - wrist.y) > Math.hypot(pip.x - wrist.x, pip.y - wrist.y) * 1.2;
+        };
+        const fingersExtended = [
+            isFingerExtended(indexTip, wrist, smoothed[6]),
+            isFingerExtended(middleTip, wrist, smoothed[10]),
+            isFingerExtended(ringTip, wrist, smoothed[14]),
+            isFingerExtended(pinkyTip, wrist, smoothed[18])
+        ].filter(Boolean).length;
+
+        // Basic Gesture State
+        if (pinchDist < CONFIG.PINCH_THRESHOLD) {
             STATE.gesture = 'PINCH';
             if (STATE.mode === 'IDLE') STATE.mode = 'SELECTING';
+        } else if (fingersExtended === 0 && pinchDist > 0.1) {
+            if (STATE.fistStartTime === 0) STATE.fistStartTime = Date.now();
+            else if (Date.now() - STATE.fistStartTime > 1000) {
+                STATE.gesture = 'FIST_HOLD';
+                undoLastAction();
+                STATE.fistStartTime = 0;
+            }
         } else {
-            STATE.gesture = 'OPEN';
-            if (STATE.mode === 'DRAWING') {
-                finalizeShape();
-                STATE.mode = 'IDLE';
-                STATE.startPoint = null;
+            STATE.fistStartTime = 0;
+            if (fingersExtended === 4) STATE.gesture = 'OPEN_PALM';
+            else STATE.gesture = 'GRAB';
+        }
+
+        // TWO HAND LOGIC (Zoom & Extrude)
+        if (STATE.hands.length === 2) {
+            const h1 = STATE.smoothedLandmarks[0][0]; 
+            const h2 = STATE.smoothedLandmarks[1][0]; 
+            const dist = Math.hypot(h1.x - h2.x, h1.y - h2.y);
+            
+            // Check if both are pinching
+            const h2Thumb = STATE.smoothedLandmarks[1][4];
+            const h2Index = STATE.smoothedLandmarks[1][8];
+            const h2Pinch = Math.hypot(h2Thumb.x - h2Index.x, h2Thumb.y - h2Index.y) < CONFIG.PINCH_THRESHOLD;
+
+            if (STATE.gesture === 'PINCH' && h2Pinch) {
+                STATE.gesture = 'TWO_HAND_PINCH';
+                
+                // Vertical Separation -> Extrude
+                if (Math.abs(h1.y - h2.y) > 0.2) {
+                    STATE.mode = 'EXTRUDING';
+                    handleExtrusion(Math.abs(h1.y - h2.y));
+                } 
+                // Horizontal Spread -> Zoom
+                else {
+                    STATE.mode = 'ZOOMING';
+                    handleZoom(dist);
+                }
             }
         }
-
-        // Two Hand Extrusion
-        if (STATE.hands.length === 2 && STATE.gesture === 'PINCH') {
-            const h1 = smoothed[0];
-            const h2 = STATE.smoothedLandmarks[1][0];
-            const vDiff = Math.abs(h1.y - h2.y);
-            if (vDiff > 0.15) handleExtrusion(vDiff);
+        
+        // ROTATION LOGIC (Single Hand Grab + Wrist Twist)
+        if (STATE.gesture === 'GRAB' && STATE.selectedObject) {
+            STATE.mode = 'ROTATING';
+            STATE.isRotating = true;
+            
+            // Calculate Wrist Angle relative to vertical
+            // Vector from Wrist (0) to Middle Finger MCP (9) or Index MCP (5)
+            const vecX = smoothed[5].x - wrist.x;
+            const vecY = smoothed[5].y - wrist.y;
+            
+            // Angle in radians (-PI to PI)
+            const currentAngle = Math.atan2(vecY, vecX);
+            
+            if (STATE.lastWristAngle !== 0) {
+                let angleDiff = currentAngle - STATE.lastWristAngle;
+                
+                // Handle wrap-around (e.g., -3.14 to 3.14)
+                if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                
+                // Apply Rotation to Object
+                // We rotate around Y axis based on hand roll
+                STATE.selectedObject.rotation.y += angleDiff * CONFIG.ROTATION_SENSITIVITY * 10;
+            }
+            STATE.lastWristAngle = currentAngle;
+        } else {
+            STATE.isRotating = false;
+            STATE.lastWristAngle = 0;
         }
     });
 
-    return avgConf / STATE.hands.length;
-}
-
-function drawSkeleton(landmarks, side) {
-    if (!STATE.showSkeleton) return;
-    const color = side === 'Left' ? CONFIG.COLORS.LEFT : CONFIG.COLORS.RIGHT;
-    const c = new THREE.Color(color);
-    
-    handCtx.lineWidth = 3;
-    handCtx.lineCap = 'round';
-    handCtx.strokeStyle = `rgba(${c.r*255}, ${c.g*255}, ${c.b*255}, 0.6)`;
-    
-    const connections = [
-        [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8],
-        [0,9],[9,10],[10,11],[11,12], [0,13],[13,14],[14,15],[15,16],
-        [0,17],[17,18],[18,19],[19,20], [5,9],[9,13],[13,17]
-    ];
-
-    handCtx.beginPath();
-    connections.forEach(([i, j]) => {
-        const p1 = landmarks[i];
-        const p2 = landmarks[j];
-        handCtx.moveTo(p1.x * window.innerWidth, p1.y * window.innerHeight);
-        handCtx.lineTo(p2.x * window.innerWidth, p2.y * window.innerHeight);
-    });
-    handCtx.stroke();
-
-    landmarks.forEach((lm, i) => {
-        const x = lm.x * window.innerWidth;
-        const y = lm.y * window.innerHeight;
-        handCtx.beginPath();
-        handCtx.arc(x, y, i===4||i===8 ? 8 : 5, 0, 2*Math.PI);
-        handCtx.fillStyle = `rgba(${c.r*255}, ${c.g*255}, ${c.b*255}, ${lm.visibility})`;
-        handCtx.fill();
-        // Glow
-        handCtx.shadowBlur = 15;
-        handCtx.shadowColor = `rgba(${c.r*255}, ${c.g*255}, ${c.b*255}, 0.8)`;
-        handCtx.stroke();
-        handCtx.shadowBlur = 0;
-    });
+    return avgConfidence / STATE.hands.length;
 }
 
 /**
- * SECTION 5: THREE.JS SETUP
+ * SECTION 4: THREE.JS SCENE
  */
 function initThreeJS() {
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 2, 5);
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 2, 6);
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, alpha: true, antialias: true });
@@ -278,16 +292,16 @@ function initThreeJS() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
 
-    const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambLight);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
     dirLight.position.set(5, 10, 5);
     dirLight.castShadow = true;
     scene.add(dirLight);
 
-    const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
-    grid.position.y = 0.01;
-    scene.add(grid);
+    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
 
     const planeGeo = new THREE.PlaneGeometry(100, 100);
     const planeMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -296,74 +310,93 @@ function initThreeJS() {
     scene.add(constructionPlane);
 
     raycaster = new THREE.Raycaster();
-    
-    animate();
 }
 
 /**
- * SECTION 6: INTERACTION LOGIC
+ * SECTION 5: RAYCASTING
  */
-function getRaycastPoint(lm) {
-    if (!lm) return null;
-    const ndcX = -(lm.x * 2 - 1);
-    const ndcY = -(lm.y * 2 - 1);
+function getRaycastPoint(landmark) {
+    if (!landmark) return null;
+    const ndcX = -(landmark.x * 2 - 1); 
+    const ndcY = -(landmark.y * 2 - 1);
     const mouse = new THREE.Vector2(ndcX, ndcY);
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(constructionPlane);
     return intersects.length > 0 ? intersects[0].point : null;
 }
 
+/**
+ * SECTION 6: INTERACTION HANDLERS
+ */
 function handleInteraction() {
-    if (STATE.smoothedLandmarks.length === 0) return;
-    const indexTip = STATE.smoothedLandmarks[0][8];
-    const pt = getRaycastPoint(indexTip);
+    const primaryHand = STATE.smoothedLandmarks[0];
+    if (!primaryHand) return;
 
-    if (pt) {
+    const indexTip = primaryHand[8];
+    const worldPoint = getRaycastPoint(indexTip);
+
+    // Crosshair
+    if (worldPoint && STATE.showSkeleton) {
         crosshair.classList.remove('hidden');
-        const vec = pt.clone().project(camera);
-        crosshair.style.left = `${(vec.x * .5 + .5) * window.innerWidth}px`;
-        crosshair.style.top = `${(-(vec.y * .5) + .5) * window.innerHeight}px`;
+        const vec = worldPoint.clone();
+        vec.project(camera);
+        const x = (vec.x * .5 + .5) * window.innerWidth;
+        const y = (-(vec.y * .5) + .5) * window.innerHeight;
+        crosshair.style.left = `${x}px`;
+        crosshair.style.top = `${y}px`;
     } else {
         crosshair.classList.add('hidden');
     }
 
+    // Drawing Logic
     if (STATE.gesture === 'PINCH') {
+        promptOverlay.innerText = STATE.selectedObject ? "RELEASE TO CONFIRM" : "PINCH TO DRAW";
         promptOverlay.classList.remove('hidden');
-        if (STATE.mode === 'SELECTING' && pt) {
-            STATE.startPoint = pt;
+        
+        if (STATE.mode === 'SELECTING' && worldPoint) {
+            STATE.startPoint = worldPoint;
             STATE.mode = 'DRAWING';
-            createPreview();
-        } else if (STATE.mode === 'DRAWING' && pt) {
-            updatePreview(pt);
+            createShapePreview();
+        } else if (STATE.mode === 'DRAWING' && worldPoint) {
+            updateShapePreview(worldPoint);
         }
     } else {
         promptOverlay.classList.add('hidden');
+        if (STATE.mode === 'DRAWING') {
+            finalizeShape();
+            STATE.mode = STATE.selectedObject ? 'MANIPULATING' : 'IDLE';
+            STATE.startPoint = null;
+        }
     }
 }
 
-function createPreview() {
+function createShapePreview() {
     if (STATE.selectedObject) scene.remove(STATE.selectedObject);
-    const geo = new THREE.RingGeometry(0.05, 0.08, 32);
-    const mat = new THREE.MeshBasicMaterial({ color: CONFIG.COLORS.PINCH, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
-    STATE.selectedObject = new THREE.Mesh(geo, mat);
+    const geometry = new THREE.RingGeometry(0.05, 0.08, 32);
+    const material = new THREE.MeshBasicMaterial({ color: CONFIG.COLORS.PINCH_ACTIVE, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+    STATE.selectedObject = new THREE.Mesh(geometry, material);
     STATE.selectedObject.rotation.x = -Math.PI / 2;
     STATE.selectedObject.position.copy(STATE.startPoint);
     scene.add(STATE.selectedObject);
 }
 
-function updatePreview(curr) {
+function updateShapePreview(currentPoint) {
     if (!STATE.selectedObject || !STATE.startPoint) return;
     scene.remove(STATE.selectedObject);
-    
-    const w = Math.abs(curr.x - STATE.startPoint.x);
-    const d = Math.abs(curr.z - STATE.startPoint.z);
-    const cx = (STATE.startPoint.x + curr.x) / 2;
-    const cz = (STATE.startPoint.z + curr.z) / 2;
 
-    const geo = new THREE.BoxGeometry(Math.max(w, 0.1), 0.1, Math.max(d, 0.1));
-    const mat = new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.LEFT, roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.6 });
-    STATE.selectedObject = new THREE.Mesh(geo, mat);
-    STATE.selectedObject.position.set(cx, 0.05, cz);
+    const width = Math.abs(currentPoint.x - STATE.startPoint.x);
+    const depth = Math.abs(currentPoint.z - STATE.startPoint.z);
+    const centerX = (STATE.startPoint.x + currentPoint.x) / 2;
+    const centerZ = (STATE.startPoint.z + currentPoint.z) / 2;
+
+    let geometry;
+    if (width > depth * 1.5) geometry = new THREE.BoxGeometry(width, 0.1, 0.2);
+    else if (depth > width * 1.5) geometry = new THREE.BoxGeometry(0.2, 0.1, depth);
+    else geometry = new THREE.BoxGeometry(width, 0.1, depth);
+
+    const material = new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.OBJECT_SELECTED, roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.6 });
+    STATE.selectedObject = new THREE.Mesh(geometry, material);
+    STATE.selectedObject.position.set(centerX, 0.05, centerZ);
     STATE.selectedObject.castShadow = true;
     scene.add(STATE.selectedObject);
 }
@@ -371,50 +404,158 @@ function updatePreview(curr) {
 function finalizeShape() {
     if (STATE.selectedObject) {
         STATE.selectedObject.material.opacity = 1.0;
+        STATE.selectedObject.material.color.setHex(CONFIG.COLORS.LEFT_HAND);
         STATE.objects.push(STATE.selectedObject);
-        STATE.selectedObject = null;
+        // Don't clear selectedObject yet, allow immediate grab
+        STATE.mode = 'MANIPULATING';
     }
 }
 
-function handleExtrusion(sep) {
-    if (STATE.objects.length === 0) return;
-    const obj = STATE.objects[STATE.objects.length - 1];
-    const scale = 1 + (sep * 4);
-    obj.scale.y = THREE.MathUtils.lerp(obj.scale.y, scale, 0.1);
-    obj.position.y = obj.scale.y / 2;
-    obj.material.color.setHex(CONFIG.COLORS.RIGHT);
+function handleExtrusion(separation) {
+    if (!STATE.objects.length) return;
+    const lastObj = STATE.objects[STATE.objects.length - 1];
+    const targetScale = 1 + (separation * 5);
+    lastObj.scale.y = THREE.MathUtils.lerp(lastObj.scale.y, targetScale, 0.1);
+    lastObj.position.y = lastObj.scale.y / 2;
+    lastObj.material.color.setHex(CONFIG.COLORS.RIGHT_HAND);
 }
 
-function animate() {
-    requestAnimationFrame(animate);
-    const delta = clock.getDelta();
-    STATE.fps = Math.round(1/delta);
-    document.getElementById('fps-counter').innerText = STATE.fps;
-
-    // UI Updates
-    uiGesture.innerText = STATE.gesture;
-    uiMode.innerText = `Mode: ${STATE.mode}`;
-    uiGesture.style.color = STATE.gesture === 'PINCH' ? '#FF9500' : '#34C759';
+function handleZoom(dist) {
+    if (STATE.initialTwoHandDist === 0) {
+        STATE.initialTwoHandDist = dist;
+        STATE.lastZoomDist = dist;
+    }
     
-    // Simple confidence mockup based on hand presence
-    const conf = STATE.hands.length > 0 ? 0.9 : 0.0;
-    uiConfFill.style.width = `${conf * 100}%`;
-    uiConfText.innerText = `${Math.round(conf*100)}%`;
-
-    handleInteraction();
-    renderer.render(scene, camera);
+    const delta = dist - STATE.lastZoomDist;
+    
+    // Zoom In (Spread) vs Zoom Out (Pinch Together)
+    if (delta > 0.01) {
+        // Zoom In (Increase FOV slightly or move camera closer? Let's move camera closer)
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, camera.position.z - 0.1, 0.1);
+    } else if (delta < -0.01) {
+        // Zoom Out
+        camera.position.z = THREE.MathUtils.lerp(camera.position.z, camera.position.z + 0.1, 0.1);
+    }
+    
+    STATE.lastZoomDist = dist;
 }
 
-// Controls
+function undoLastAction() {
+    if (STATE.objects.length > 0) {
+        const obj = STATE.objects.pop();
+        scene.remove(obj);
+        obj.geometry.dispose();
+        obj.material.dispose();
+    }
+}
+
 document.getElementById('reset-scene').addEventListener('click', () => {
-    STATE.objects.forEach(o => { scene.remove(o); o.geometry.dispose(); o.material.dispose(); });
+    STATE.objects.forEach(obj => { scene.remove(obj); obj.geometry.dispose(); obj.material.dispose(); });
     STATE.objects = [];
+    STATE.selectedObject = null;
 });
+
 document.getElementById('toggle-skeleton').addEventListener('click', (e) => {
     STATE.showSkeleton = !STATE.showSkeleton;
     e.target.innerText = STATE.showSkeleton ? "Hide Skeleton" : "Show Skeleton";
 });
 
-// Bootstrap
+/**
+ * SECTION 7: RENDER SKELETON
+ */
+function drawHandSkeleton(landmarks, handedness) {
+    if (!STATE.showSkeleton) return;
+    const color = handedness === 'Left' ? CONFIG.COLORS.LEFT_HAND : CONFIG.COLORS.RIGHT_HAND;
+    const hexColor = new THREE.Color(color);
+    
+    handCtx.lineWidth = 2;
+    handCtx.lineCap = 'round';
+    handCtx.lineJoin = 'round';
+
+    const connections = [
+        [0,1], [1,2], [2,3], [3,4], [0,5], [5,6], [6,7], [7,8],
+        [0,9], [9,10], [10,11], [11,12], [0,13], [13,14], [14,15], [15,16],
+        [0,17], [17,18], [18,19], [19,20], [5,9], [9,13], [13,17]
+    ];
+
+    handCtx.beginPath();
+    connections.forEach(([i, j]) => {
+        const p1 = landmarks[i];
+        const p2 = landmarks[j];
+        const x1 = p1.x * window.innerWidth;
+        const y1 = p1.y * window.innerHeight;
+        const x2 = p2.x * window.innerWidth;
+        const y2 = p2.y * window.innerHeight;
+        handCtx.moveTo(x1, y1);
+        handCtx.lineTo(x2, y2);
+    });
+    handCtx.strokeStyle = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, 0.6)`;
+    handCtx.stroke();
+
+    landmarks.forEach((lm, i) => {
+        const x = lm.x * window.innerWidth;
+        const y = lm.y * window.innerHeight;
+        const radius = (i === 4 || i === 8) ? 6 : 4;
+        handCtx.beginPath();
+        handCtx.arc(x, y, radius, 0, 2 * Math.PI);
+        handCtx.fillStyle = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, ${lm.visibility})`;
+        handCtx.fill();
+        handCtx.shadowBlur = 10;
+        handCtx.shadowColor = `rgba(${hexColor.r*255}, ${hexColor.g*255}, ${hexColor.b*255}, 0.8)`;
+        handCtx.stroke();
+        handCtx.shadowBlur = 0;
+    });
+}
+
+/**
+ * SECTION 8: UI UPDATES
+ */
+function updateUI(confidence) {
+    let statusText = STATE.gesture.replace('_', ' ');
+    if (STATE.isRotating) statusText = "ROTATING";
+    if (STATE.mode === 'ZOOMING') statusText = "ZOOMING";
+    
+    uiGesture.innerText = statusText;
+    uiMode.innerText = `Mode: ${STATE.mode}`;
+    
+    if (STATE.isRotating) uiGesture.style.color = '#FFFFFF';
+    else if (STATE.gesture === 'PINCH') uiGesture.style.color = '#FF9500';
+    else if (STATE.gesture === 'GRAB') uiGesture.style.color = '#FF3B30';
+    else uiGesture.style.color = '#34C759';
+
+    const confPct = Math.round(confidence * 100);
+    uiConf.style.width = `${confPct}%`;
+    uiConfText.innerText = `${confPct}%`;
+    uiConf.style.background = confPct > 0.7 ? '#34C759' : '#FF9500';
+}
+
+/**
+ * SECTION 9: ANIMATION LOOP
+ */
+function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    const delta = clock.getDelta();
+    fpsCounter.innerText = Math.round(1 / delta);
+
+    if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+        if (now - lastVideoTime >= 1000 / 30) {
+            lastVideoTime = now;
+            if (handLandmarker) {
+                const results = handLandmarker.detectForVideo(videoElement, now);
+                const confidence = detectGestures(results);
+                handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+                results.landmarks.forEach((lm, idx) => {
+                    const handedness = results.handednesses[idx]?.categoryName || 'Right';
+                    drawHandSkeleton(lm, handedness);
+                });
+                handleInteraction();
+                updateUI(confidence);
+            }
+        }
+    }
+    renderer.render(scene, camera);
+}
+
 initMediaPipe();
 initThreeJS();
