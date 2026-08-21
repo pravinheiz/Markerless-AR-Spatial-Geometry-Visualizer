@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Spatial Geometry Visualizer</title>
     
-    <!-- Import Map for Three.js -->
+    <!-- Three.js Import Map -->
     <script type="importmap">
         {
             "imports": {
@@ -15,7 +15,7 @@
         }
     </script>
 
-    <!-- ROBUST MEDIAPIPE LEGACY CDN (No WASM fetching issues) -->
+    <!-- Legacy MediaPipe Hands (No WASM issues) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -25,29 +25,30 @@
 </head>
 <body>
 
-    <!-- LAYER 0: Webcam -->
-    <video id="webcam-video" autoplay playsinline muted></video>
-
-    <!-- LAYER 1: Three.js Scene -->
+    <!-- Layer 0: Webcam -->
+    <video id="input-video" style="display:none;"></video>
+    
+    <!-- Layer 1: 3D Scene -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- LAYER 2: Hand Skeleton Overlay -->
-    <canvas id="hand-canvas"></canvas>
+    <!-- Layer 2: Hand Skeleton Overlay -->
+    <canvas id="output-canvas"></canvas>
 
     <!-- UI Overlay -->
     <div id="ui-layer">
         <div class="panel top-left">
             <h1>AR Geometry Visualizer</h1>
-            <div class="status-indicator" id="gesture-status">INITIALIZING...</div>
+            <div class="status-indicator" id="gesture-status">LOADING...</div>
             <div class="sub-status" id="mode-status">Mode: IDLE</div>
         </div>
 
         <div class="panel top-right">
-            <h3>Gesture Guide</h3>
+            <h3>Controls</h3>
             <ul>
                 <li><span class="key">Pinch</span> Draw / Select</li>
-                <li><span class="key">Grab</span> Move Object</li>
-                <li><span class="key">2-Hand Split</span> Extrude 3D</li>
+                <li><span class="key">Grab + Twist</span> Rotate Object</li>
+                <li><span class="key">2-Hand Pinch</span> Zoom In/Out</li>
+                <li><span class="key">2-Hand Vertical</span> Extrude 3D</li>
                 <li><span class="key">Fist (1s)</span> Undo</li>
             </ul>
         </div>
@@ -59,7 +60,7 @@
 
         <div class="panel bottom-right">
             <div>FPS: <span id="fps-counter">0</span></div>
-            <div>Conf: <span id="conf-bar">0%</span></div>
+            <div>Confidence: <span id="conf-text">0%</span></div>
             <div class="bar-container"><div id="conf-fill"></div></div>
         </div>
 
@@ -67,12 +68,10 @@
         <div id="prompt-overlay" class="hidden">PINCH TO DRAW</div>
     </div>
 
-    <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="spinner"></div>
-        <h2>Loading Hand Tracking...</h2>
-        <p id="loading-msg">Initializing models...</p>
-        <button id="start-btn" style="display:none; margin-top:15px; padding:10px 20px; background:#00ff88; border:none; color:#000; font-weight:bold; cursor:pointer;">START CAMERA</button>
+        <h2>Initializing Hand Tracking...</h2>
+        <p>Please allow camera access.</p>
     </div>
 
     <script type="module" src="main.js"></script>
