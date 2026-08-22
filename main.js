@@ -1,51 +1,57 @@
 import * as THREE from 'three';
 
-// --- CONFIGURATION ---
-const CONFIG = {
-    SMOOTHING_ALPHA: 0.3,
-    PINCH_THRESHOLD: 0.05,
-    GRAB_THRESHOLD: 0.15,
+/**
+ * CONFIGURATION
+ */
+const CFG = {
+    SMOOTHING: 0.4,
+    PINCH_DIST: 0.05,
+    GRAB_DIST: 0.12, // Avg finger curl threshold
+    ROT_SENS: 0.05,
     COLORS: {
-        LEFT: 0x007AFF,
-        RIGHT: 0x34C759,
-        PINCH: 0xFF9500,
-        GRAB: 0xFF3B30,
-        OBJECT: 0x00FF88
+        DRAW: 0x00ff88,
+        GRAB: 0xffaa00,
+        ZOOM: 0x00ccff
     }
 };
 
-// --- STATE ---
+/**
+ * STATE MANAGEMENT
+ */
 const STATE = {
-    mode: 'IDLE', // IDLE, DRAWING, ROTATING, ZOOMING, EXTRUDING
+    mode: 'IDLE', // IDLE, DRAWING, GRABBED, EXTRUDING, ZOOMING
     gesture: 'NONE',
     hands: [],
-    smoothed: [],
+    landmarks: [], // Smoothed
     objects: [],
-    selectedObject: null,
-    startPoint: null,
-    initialDist: 0,
-    fistStart: 0,
+    currentLine: null,
+    linePoints: [],
+    selectedObj: null,
+    initTwoHandDist: 0,
     showSkeleton: true
 };
 
-// --- DOM ELEMENTS ---
-const videoElement = document.getElementById('input-video');
-const canvasElement = document.getElementById('output-canvas');
-const canvasCtx = canvasElement.getContext('2d');
+// DOM
+const video = document.getElementById('webcam-input');
+const handCanvas = document.getElementById('hand-canvas');
+const handCtx = handCanvas.getContext('2d');
 const webglCanvas = document.getElementById('webgl-canvas');
-const uiGesture = document.getElementById('gesture-status');
-const uiMode = document.getElementById('mode-status');
-const uiConfFill = document.getElementById('conf-fill');
-const uiConfText = document.getElementById('conf-text');
+const uiGesture = document.getElementById('gesture-display');
+const uiMode = document.getElementById('mode-display');
+const uiTrack = document.getElementById('track-bar');
+const uiTrackVal = document.getElementById('track-val');
+const uiFps = document.getElementById('fps-val');
 const crosshair = document.getElementById('crosshair');
-const prompt = document.getElementById('prompt-overlay');
-const loadingScreen = document.getElementById('loading-screen');
+const prompt = document.getElementById('prompt');
+const loading = document.getElementById('loading');
 
-// --- THREE.JS GLOBALS ---
-let scene, camera, renderer, raycaster, planeMesh;
+// Three.js
+let scene, camera, renderer, raycaster, plane;
 let clock = new THREE.Clock();
 
-// --- SECTION 1: MEDIAPIPE SETUP (LEGACY API) ---
+/**
+ * SECTION 1: MEDIAPIPE INIT (LEGACY API FOR STABILITY)
+ */
 function initMediaPipe() {
     const hands = new Hands({locateFile: (file) => {
         return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
@@ -60,20 +66,16 @@ function initMediaPipe() {
 
     hands.onResults(onHandsResults);
 
-    // Use Camera Utility from Legacy API
-    const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
+    const cam = new Camera(video, {
+        onFrame: async () => await hands.send({image: video}),
         width: 1280,
         height: 720
     });
 
-    cameraUtils.start()
+    cam.start()
         .then(() => {
-            console.log("Camera started");
-            loadingScreen.style.opacity = '0';
-            setTimeout(() => loadingScreen.style.display = 'none', 500);
+            loading.style.opacity = 0;
+            setTimeout(() => loading.style.display = 'none', 500);
         })
         .catch(err => {
             console.error("Camera Error:", err);
@@ -81,286 +83,187 @@ function initMediaPipe() {
         });
 }
 
-// --- SECTION 2: SMOOTHING (One Euro Filter Simplified) ---
-class SimpleFilter {
-    constructor(alpha) { this.alpha = alpha; this.prev = null; }
-    update(val) {
-        if (this.prev === null) { this.prev = val; return val; }
-        const res = this.alpha * val + (1 - this.alpha) * this.prev;
-        this.prev = res;
-        return res;
-    }
-}
-const filters = []; // Will hold filters for each landmark
+/**
+ * SECTION 2: MATH & FILTERING
+ */
+const prevLandmarks = [];
 
-// --- SECTION 3: GESTURE LOGIC ---
+function smoothLandmark(current, prev, alpha) {
+    if (!prev) return current;
+    return {
+        x: current.x * alpha + prev.x * (1 - alpha),
+        y: current.y * alpha + prev.y * (1 - alpha),
+        z: current.z * alpha + prev.z * (1 - alpha)
+    };
+}
+
+function getDistance(p1, p2) {
+    return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2) + Math.pow(p1.z - p2.z, 2));
+}
+
+/**
+ * SECTION 3: GESTURE RECOGNITION
+ */
 function onHandsResults(results) {
-    // Resize canvas
-    canvasElement.width = window.innerWidth;
-    canvasElement.height = window.innerHeight;
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    // Resize hand canvas
+    handCanvas.width = window.innerWidth;
+    handCanvas.height = window.innerHeight;
+    handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
 
     STATE.hands = results.multiHandLandmarks || [];
-    STATE.gesture = 'NONE';
-    let avgConf = 0;
+    STATE.landmarks = [];
+    let totalConf = 0;
 
     if (STATE.hands.length === 0) {
+        STATE.gesture = 'NONE';
+        if (STATE.mode === 'DRAWING') finalizeDrawing();
+        if (STATE.mode === 'GRABBED') STATE.selectedObj = null;
         STATE.mode = 'IDLE';
-        STATE.selectedObject = null;
-        return;
     }
 
-    // Process Hands
-    STATE.hands.forEach((landmarks, idx) => {
-        if (!filters[idx]) filters[idx] = Array(21).fill(null).map(() => new SimpleFilter(CONFIG.SMOOTHING_ALPHA));
-        
-        // Smooth landmarks
-        const smoothLm = landmarks.map((lm, i) => ({
-            x: filters[idx][i].update(lm.x),
-            y: filters[idx][i].update(lm.y),
-            z: filters[idx][i].update(lm.z)
-        }));
-        STATE.smoothed[idx] = smoothLm;
-        avgConf += 1; // Simplified confidence
+    STATE.hands.forEach((lmList, idx) => {
+        // Smooth
+        const smoothed = lmList.map((lm, i) => {
+            if (!prevLandmarks[idx]) prevLandmarks[idx] = [];
+            prevLandmarks[idx][i] = smoothLandmark(lm, prevLandmarks[idx][i], CFG.SMOOTHING);
+            return prevLandmarks[idx][i];
+        });
+        STATE.landmarks.push(smoothed);
+        totalConf += smoothed.reduce((acc, l) => acc + (l.visibility || 1), 0) / 21;
 
         // Draw Skeleton
-        if (STATE.showSkeleton) {
-            drawSkeleton(smoothLm, idx === 0 ? CONFIG.COLORS.LEFT : CONFIG.COLORS.RIGHT);
-        }
+        if (STATE.showSkeleton) drawSkeleton(smoothed, idx);
 
-        // Gesture Detection
-        const thumb = smoothLm[4];
-        const index = smoothLm[8];
-        const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+        // Gesture Logic
+        const thumb = smoothed[4];
+        const index = smoothed[8];
+        const middle = smoothed[12];
+        const ring = smoothed[16];
+        const pinky = smoothed[20];
+        const wrist = smoothed[0];
 
-        if (dist < CONFIG.PINCH_THRESHOLD) {
+        const pinchDist = getDistance(thumb, index);
+        
+        // Check Grab (All fingers curled except thumb roughly)
+        // Simple heuristic: Distance from tip to wrist is small
+        const isGrabbed = 
+            getDistance(index, wrist) < 0.3 &&
+            getDistance(middle, wrist) < 0.3 &&
+            getDistance(ring, wrist) < 0.3 &&
+            getDistance(pinky, wrist) < 0.3;
+
+        if (pinchDist < CFG.PINCH_DIST) {
             STATE.gesture = 'PINCH';
-        } else {
-            // Check for Grab (fingers curled) - simplified check
-            const middleTip = smoothLm[12];
-            const wrist = smoothLm[0];
-            if (Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y) < 0.3) {
-                STATE.gesture = 'GRAB';
-            } else {
-                STATE.gesture = 'OPEN';
+            if (STATE.mode === 'IDLE') STATE.mode = 'DRAWING';
+        } else if (isGrabbed) {
+            STATE.gesture = 'GRAB';
+            if (STATE.mode === 'IDLE' || STATE.mode === 'DRAWING') {
+                // Try to select nearest object
+                selectNearestObject(index);
+                if (STATE.selectedObj) STATE.mode = 'GRABBED';
             }
+        } else {
+            STATE.gesture = 'OPEN';
+            if (STATE.mode === 'DRAWING') finalizeDrawing();
+            if (STATE.mode === 'GRABBED') STATE.selectedObj = null;
+            STATE.mode = 'IDLE';
         }
 
         // Two Hand Logic
-        if (STATE.hands.length === 2 && STATE.gesture === 'PINCH') {
-            const h1 = STATE.smoothed[0][0]; // Wrist 1
-            const h2 = STATE.smoothed[1][0]; // Wrist 2
-            const d = Math.hypot(h1.x - h2.x, h1.y - h2.y);
+        if (STATE.hands.length === 2) {
+            const h1 = STATE.landmarks[0][0];
+            const h2 = STATE.landmarks[1][0];
+            const dist = getDistance(h1, h2);
             
-            if (STATE.initialDist === 0) STATE.initialDist = d;
-            
-            const ratio = d / STATE.initialDist;
-            
-            // Vertical Separation -> Extrude
-            if (Math.abs(h1.y - h2.y) > 0.25) {
-                STATE.mode = 'EXTRUDING';
-                handleExtrusion(Math.abs(h1.y - h2.y));
-            } 
-            // Horizontal Spread -> Zoom
-            else if (Math.abs(h1.x - h2.x) > 0.15) {
-                STATE.mode = 'ZOOMING';
-                handleZoom(ratio);
+            if (STATE.gesture === 'PINCH' && STATE.landmarks[1][4]) {
+                 const d2 = getDistance(STATE.landmarks[1][4], STATE.landmarks[1][8]);
+                 if (d2 < CFG.PINCH_DIST) {
+                     STATE.gesture = 'TWO_HAND';
+                     // Vertical Diff -> Extrude
+                     if (Math.abs(h1.y - h2.y) > 0.2) {
+                         STATE.mode = 'EXTRUDING';
+                         extrudeObjects(Math.abs(h1.y - h2.y));
+                     } 
+                     // Horizontal Diff -> Zoom
+                     else {
+                         STATE.mode = 'ZOOMING';
+                         zoomCamera(dist);
+                     }
+                 }
             }
-        } else {
-            STATE.initialDist = 0;
-            if (STATE.mode === 'ZOOMING' || STATE.mode === 'EXTRUDING') STATE.mode = 'IDLE';
         }
     });
 
-    updateUI(avgConf / STATE.hands.length);
-    handleInteraction();
+    updateUI(totalConf / (STATE.hands.length || 1));
 }
 
-function drawSkeleton(landmarks, color) {
-    const connections = [
-        [0,1],[1,2],[2,3],[3,4], [0,5],[5,6],[6,7],[7,8],
-        [0,9],[9,10],[10,11],[11,12], [0,13],[13,14],[14,15],[15,16],
-        [0,17],[17,18],[18,19],[19,20], [5,9],[9,13],[13,17]
-    ];
+function drawSkeleton(lm, handIdx) {
+    const color = handIdx === 0 ? '#00ff88' : '#00ccff';
+    handCtx.strokeStyle = color;
+    handCtx.lineWidth = 2;
+    handCtx.beginPath();
     
-    canvasCtx.strokeStyle = `rgba(${new THREE.Color(color).r*255}, ${new THREE.Color(color).g*255}, ${new THREE.Color(color).b*255}, 0.6)`;
-    canvasCtx.lineWidth = 3;
-    canvasCtx.lineCap = 'round';
+    const connections = [
+        [0,1],[1,2],[2,3],[3,4], // Thumb
+        [0,5],[5,6],[6,7],[7,8], // Index
+        [0,9],[9,10],[10,11],[11,12], // Middle
+        [0,13],[13,14],[14,15],[15,16], // Ring
+        [0,17],[17,18],[18,19],[19,20], // Pinky
+        [5,9],[9,13],[13,17] // Palm
+    ];
 
     connections.forEach(([i, j]) => {
-        const p1 = landmarks[i];
-        const p2 = landmarks[j];
-        canvasCtx.beginPath();
-        canvasCtx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
-        canvasCtx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
-        canvasCtx.stroke();
+        const p1 = lm[i];
+        const p2 = lm[j];
+        // Map to screen (CSS mirrors, so we map directly)
+        handCtx.moveTo(p1.x * window.innerWidth, p1.y * window.innerHeight);
+        handCtx.lineTo(p2.x * window.innerWidth, p2.y * window.innerHeight);
     });
+    handCtx.stroke();
 
-    landmarks.forEach((lm, i) => {
-        canvasCtx.beginPath();
-        canvasCtx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, (i===4||i===8)?8:5, 0, 2*Math.PI);
-        canvasCtx.fillStyle = `rgba(${new THREE.Color(color).r*255}, ${new THREE.Color(color).g*255}, ${new THREE.Color(color).b*255}, 0.9)`;
-        canvasCtx.fill();
+    // Draw joints
+    lm.forEach((p, i) => {
+        handCtx.beginPath();
+        handCtx.arc(p.x * window.innerWidth, p.y * window.innerHeight, i===4||i===8 ? 6 : 3, 0, Math.PI*2);
+        handCtx.fillStyle = color;
+        handCtx.fill();
     });
 }
 
-// --- SECTION 4: INTERACTION & MATH ---
-function getRaycastPoint(lm) {
-    if (!lm) return null;
-    const ndcX = -(lm.x * 2 - 1);
-    const ndcY = -(lm.y * 2 - 1);
-    const mouse = new THREE.Vector2(ndcX, ndcY);
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(planeMesh);
-    return intersects.length > 0 ? intersects[0].point : null;
-}
-
-function handleInteraction() {
-    const hand = STATE.smoothed[0];
-    if (!hand) return;
-    const indexTip = hand[8];
-    const worldPt = getRaycastPoint(indexTip);
-
-    // Crosshair
-    if (worldPt && STATE.showSkeleton) {
-        crosshair.classList.remove('hidden');
-        const vec = worldPt.clone().project(camera);
-        crosshair.style.left = `${(vec.x * .5 + .5) * window.innerWidth}px`;
-        crosshair.style.top = `${(-(vec.y * .5) + .5) * window.innerHeight}px`;
-    } else {
-        crosshair.classList.add('hidden');
-    }
-
-    // Pinch Logic
-    if (STATE.gesture === 'PINCH') {
-        prompt.classList.remove('hidden');
-        if (STATE.mode === 'IDLE' && worldPt) {
-            STATE.mode = 'DRAWING';
-            STATE.startPoint = worldPt;
-            createPreview();
-        } else if (STATE.mode === 'DRAWING' && worldPt) {
-            updatePreview(worldPt);
-        } else if (STATE.mode === 'ROTATING' && STATE.selectedObject && worldPt) {
-            // Rotate object based on hand X movement
-            const delta = worldPt.x - STATE.lastPt.x;
-            STATE.selectedObject.rotation.y += delta * 2;
-        }
-        STATE.lastPt = worldPt;
-    } else {
-        prompt.classList.add('hidden');
-        if (STATE.mode === 'DRAWING') {
-            finalizeShape();
-            STATE.mode = 'IDLE';
-            STATE.startPoint = null;
-            STATE.selectedObject = null;
-        }
-        if (STATE.mode === 'ROTATING') {
-            STATE.mode = 'IDLE';
-            STATE.selectedObject = null;
-        }
-    }
-
-    // Grab Logic (Rotate)
-    if (STATE.gesture === 'GRAB' && STATE.objects.length > 0) {
-        // Find closest object
-        // Simplified: Just grab the last one for demo
-        STATE.selectedObject = STATE.objects[STATE.objects.length - 1];
-        STATE.mode = 'ROTATING';
-        uiGesture.innerText = "ROTATING";
-        uiGesture.style.color = "#FF3B30";
-    }
-}
-
-function createPreview() {
-    if (STATE.selectedObject) scene.remove(STATE.selectedObject);
-    const geo = new THREE.RingGeometry(0.05, 0.08, 32);
-    const mat = new THREE.MeshBasicMaterial({ color: CONFIG.COLORS.PINCH, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
-    STATE.selectedObject = new THREE.Mesh(geo, mat);
-    STATE.selectedObject.rotation.x = -Math.PI/2;
-    STATE.selectedObject.position.copy(STATE.startPoint);
-    scene.add(STATE.selectedObject);
-}
-
-function updatePreview(pt) {
-    if (!STATE.selectedObject || !STATE.startPoint) return;
-    scene.remove(STATE.selectedObject);
-    
-    const w = Math.abs(pt.x - STATE.startPoint.x);
-    const d = Math.abs(pt.z - STATE.startPoint.z);
-    const cx = (STATE.startPoint.x + pt.x) / 2;
-    const cz = (STATE.startPoint.z + pt.z) / 2;
-
-    const geo = new THREE.BoxGeometry(w, 0.1, d);
-    const mat = new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.OBJECT, roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.6 });
-    STATE.selectedObject = new THREE.Mesh(geo, mat);
-    STATE.selectedObject.position.set(cx, 0.05, cz);
-    scene.add(STATE.selectedObject);
-}
-
-function finalizeShape() {
-    if (STATE.selectedObject) {
-        STATE.selectedObject.material.opacity = 1.0;
-        STATE.selectedObject.material.color.setHex(CONFIG.COLORS.LEFT);
-        STATE.objects.push(STATE.selectedObject);
-        STATE.selectedObject = null;
-    }
-}
-
-function handleExtrusion(sep) {
-    if (STATE.objects.length === 0) return;
-    const obj = STATE.objects[STATE.objects.length - 1];
-    const h = 1 + (sep * 4);
-    obj.scale.y = h;
-    obj.position.y = h / 2;
-    obj.material.color.setHex(CONFIG.COLORS.RIGHT);
-}
-
-function handleZoom(ratio) {
-    const targetFOV = 45 / ratio;
-    camera.fov += (targetFOV - camera.fov) * 0.1;
-    camera.updateProjectionMatrix();
-}
-
-function updateUI(conf) {
-    uiGesture.innerText = STATE.gesture;
-    uiMode.innerText = `Mode: ${STATE.mode}`;
-    
-    if (STATE.mode === 'ZOOMING') uiGesture.innerText = "ZOOMING";
-    if (STATE.mode === 'EXTRUDING') uiGesture.innerText = "EXTRUDING";
-    
-    const pct = Math.min(100, conf * 100);
-    uiConfFill.style.width = `${pct}%`;
-    uiConfText.innerText = `${Math.round(pct)}%`;
-}
-
-// --- SECTION 5: INIT THREE.JS ---
+/**
+ * SECTION 4: THREE.JS SETUP
+ */
 function initThree() {
     scene = new THREE.Scene();
+    // NO background color set -> Transparent
+
     camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(0, 3, 6);
-    camera.lookAt(0,0,0);
+    camera.position.set(0, 2, 5);
+    camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, alpha: true, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000, 0); // Transparent!
+    renderer.setClearColor(0x000000, 0); // Crucial for transparency
+    renderer.shadowMap.enabled = true;
 
     // Lights
     const amb = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(amb);
     const dir = new THREE.DirectionalLight(0xffffff, 0.8);
     dir.position.set(5, 10, 5);
+    dir.castShadow = true;
     scene.add(dir);
 
     // Grid
     const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
     scene.add(grid);
 
-    // Raycast Plane
+    // Invisible Raycast Plane
     const geo = new THREE.PlaneGeometry(100, 100);
     const mat = new THREE.MeshBasicMaterial({ visible: false });
-    planeMesh = new THREE.Mesh(geo, mat);
-    planeMesh.rotation.x = -Math.PI/2;
-    scene.add(planeMesh);
+    plane = new THREE.Mesh(geo, mat);
+    plane.rotation.x = -Math.PI / 2;
+    scene.add(plane);
 
     raycaster = new THREE.Raycaster();
 
@@ -371,22 +274,188 @@ function initThree() {
     });
 }
 
-// Buttons
-document.getElementById('toggle-skeleton').onclick = (e) => {
+/**
+ * SECTION 5: INTERACTION LOGIC
+ */
+function getRaycastPoint(lm) {
+    if (!lm) return null;
+    const ndcX = -(lm.x * 2 - 1);
+    const ndcY = -(lm.y * 2 - 1);
+    const mouse = new THREE.Vector2(ndcX, ndcY);
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObject(plane);
+    return hits.length > 0 ? hits[0].point : null;
+}
+
+function selectNearestObject(indexLm) {
+    const pt = getRaycastPoint(indexLm);
+    if (!pt) return;
+    
+    // Find closest object within 0.5 units
+    let closest = null;
+    let minDst = 0.5;
+    
+    STATE.objects.forEach(obj => {
+        const dst = obj.position.distanceTo(pt);
+        if (dst < minDst) {
+            minDst = dst;
+            closest = obj;
+        }
+    });
+    
+    STATE.selectedObj = closest;
+}
+
+function finalizeDrawing() {
+    if (STATE.currentLine) {
+        STATE.currentLine.geometry.setDrawRange(0, STATE.linePoints.length);
+        STATE.currentLine.userData.isDrawing = false;
+        STATE.objects.push(STATE.currentLine);
+        STATE.currentLine = null;
+        STATE.linePoints = [];
+    }
+    STATE.mode = 'IDLE';
+}
+
+function extrudeObjects(separation) {
+    if (!STATE.objects.length) return;
+    const last = STATE.objects[STATE.objects.length - 1];
+    if (last.type !== 'Line') return; // Only extrude lines for now
+
+    // Convert Line to Tube/Mesh
+    if (last.userData.isExtruded) return;
+    
+    const points = last.geometry.attributes.position.array;
+    const curve = new THREE.CatmullRomCurve3(
+        points.map((v, i) => new THREE.Vector3(v[i*3], v[i*3+1], v[i*3+2]))
+    );
+    
+    const geo = new THREE.TubeGeometry(curve, 64, 0.05, 8, false);
+    const mat = new THREE.MeshStandardMaterial({ color: CFG.COLORS.GRAB, roughness: 0.3 });
+    const mesh = new THREE.Mesh(geo, mat);
+    
+    scene.remove(last);
+    last.geometry.dispose();
+    
+    scene.add(mesh);
+    STATE.objects.pop();
+    STATE.objects.push(mesh);
+    last.userData.isExtruded = true;
+}
+
+function zoomCamera(dist) {
+    if (STATE.initTwoHandDist === 0) STATE.initTwoHandDist = dist;
+    const ratio = dist / STATE.initTwoHandDist;
+    const targetFOV = 45 / ratio;
+    camera.fov += (targetFOV - camera.fov) * 0.1;
+    camera.updateProjectionMatrix();
+}
+
+/**
+ * SECTION 6: ANIMATION LOOP
+ */
+function animate() {
+    requestAnimationFrame(animate);
+    
+    const delta = clock.getDelta();
+    uiFps.innerText = Math.round(1/delta);
+
+    // Handle Grab Rotation & Movement
+    if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
+        const lm = STATE.landmarks[0];
+        const index = lm[8];
+        const wrist = lm[0];
+        const middle = lm[12];
+        
+        // 1. Move Object to Hand Position
+        const pos = getRaycastPoint(index);
+        if (pos) {
+            // Lift object slightly based on Z depth of hand or fixed offset
+            STATE.selectedObj.position.lerp(new THREE.Vector3(pos.x, pos.y + 0.5, pos.z), 0.2);
+        }
+
+        // 2. Rotate Object based on Wrist Angle
+        // Calculate vector from Wrist to Middle Finger
+        const wristVec = new THREE.Vector3(wrist.x, wrist.y, wrist.z);
+        const midVec = new THREE.Vector3(middle.x, middle.y, middle.z);
+        const direction = midVec.sub(wristVec);
+        
+        // Map 2D screen direction to 3D rotation
+        // Tilt Wrist Up/Down -> Rotate X
+        // Tilt Wrist Left/Right -> Rotate Y
+        
+        const angleX = direction.y * 5; // Sensitivity
+        const angleY = -direction.x * 5;
+        
+        STATE.selectedObj.rotation.x += angleX * CFG.ROT_SENS;
+        STATE.selectedObj.rotation.y += angleY * CFG.ROT_SENS;
+        
+        // Visual Feedback
+        STATE.selectedObj.material.emissive.setHex(0x333333);
+    } else {
+        if (STATE.selectedObj) STATE.selectedObj.material.emissive.setHex(0x000000);
+    }
+
+    // Handle Drawing
+    if (STATE.mode === 'DRAWING' && STATE.landmarks[0]) {
+        prompt.classList.remove('hidden');
+        const pt = getRaycastPoint(STATE.landmarks[0][8]);
+        
+        if (pt) {
+            crosshair.style.display = 'block';
+            // Project 3D to 2D for crosshair
+            const vec = pt.clone();
+            vec.project(camera);
+            crosshair.style.left = (vec.x * .5 + .5) * window.innerWidth + 'px';
+            crosshair.style.top = (-(vec.y * .5) + .5) * window.innerHeight + 'px';
+
+            if (!STATE.currentLine) {
+                // Start new line
+                STATE.linePoints = [pt.x, pt.y, pt.z];
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
+                const mat = new THREE.LineBasicMaterial({ color: CFG.COLORS.DRAW, linewidth: 2 });
+                STATE.currentLine = new THREE.Line(geo, mat);
+                STATE.currentLine.userData.isDrawing = true;
+                scene.add(STATE.currentLine);
+            } else {
+                // Add point
+                STATE.linePoints.push(pt.x, pt.y, pt.z);
+                STATE.currentLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
+                STATE.currentLine.geometry.setDrawRange(0, STATE.linePoints.length / 3);
+            }
+        }
+    } else {
+        prompt.classList.add('hidden');
+        crosshair.style.display = 'none';
+    }
+
+    renderer.render(scene, camera);
+}
+
+function updateUI(conf) {
+    uiGesture.innerText = STATE.gesture;
+    uiMode.innerText = `Mode: ${STATE.mode}`;
+    
+    if (STATE.gesture === 'PINCH') uiGesture.style.color = '#ffaa00';
+    else if (STATE.gesture === 'GRAB') uiGesture.style.color = '#ff3333';
+    else uiGesture.style.color = '#00ff88';
+
+    const pct = Math.min(100, Math.round(conf * 100));
+    uiTrack.style.width = `${pct}%`;
+    uiTrackVal.innerText = `${pct}%`;
+}
+
+document.getElementById('btn-reset').onclick = () => {
+    STATE.objects.forEach(o => { scene.remove(o); o.geometry.dispose(); });
+    STATE.objects = [];
+    STATE.selectedObj = null;
+};
+
+document.getElementById('btn-skeleton').onclick = (e) => {
     STATE.showSkeleton = !STATE.showSkeleton;
     e.target.innerText = STATE.showSkeleton ? "Hide Skeleton" : "Show Skeleton";
 };
-document.getElementById('reset-scene').onclick = () => {
-    STATE.objects.forEach(o => scene.remove(o));
-    STATE.objects = [];
-};
-
-// Loop
-function animate() {
-    requestAnimationFrame(animate);
-    document.getElementById('fps-counter').innerText = Math.round(1/clock.getDelta());
-    renderer.render(scene, camera);
-}
 
 // Start
 initThree();
