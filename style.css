@@ -1,122 +1,123 @@
 :root {
-    --avp-blue: #007AFF;
-    --avp-green: #34C759;
-    --avp-orange: #FF9500;
-    --avp-red: #FF3B30;
-    --glass-bg: rgba(20, 20, 25, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.2);
+    --bg-glass: rgba(15, 20, 30, 0.7);
+    --border: rgba(255, 255, 255, 0.15);
+    --primary: #00ff88;
+    --accent: #00ccff;
+    --warn: #ffaa00;
 }
 
-* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
 
 body { overflow: hidden; background: #000; color: #fff; }
 
-/* Layers */
-#input-video { display: none; } /* Hidden, processed internally */
-
-#output-canvas {
+/* LAYER 0: VIDEO BACKGROUND */
+#webcam-input {
     position: fixed;
     top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    z-index: 2;
+    width: 100%; height: 100%;
+    object-fit: cover;
     transform: scaleX(-1); /* Mirror */
-    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5; /* See-through effect */
 }
 
+/* LAYER 1: 3D CANVAS (TRANSPARENT) */
 #webgl-canvas {
     position: fixed;
     top: 0; left: 0;
-    width: 100vw; height: 100vh;
+    width: 100%; height: 100%;
     z-index: 1;
     outline: none;
+    /* Background is transparent by default in JS */
 }
 
-#ui-layer {
+/* LAYER 2: HAND SKELETON */
+#hand-canvas {
     position: fixed;
     top: 0; left: 0;
-    width: 100vw; height: 100vh;
-    z-index: 10;
+    width: 100%; height: 100%;
+    z-index: 2;
     pointer-events: none;
+    transform: scaleX(-1);
 }
 
-/* Panels */
+/* UI */
+#ui-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+
 .panel {
     position: absolute;
-    background: var(--glass-bg);
-    backdrop-filter: blur(20px);
-    border: 1px solid var(--glass-border);
-    border-radius: 16px;
-    padding: 16px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    padding: 15px;
+    border-radius: 12px;
     pointer-events: auto;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
 
 .top-left { top: 20px; left: 20px; }
 .top-right { top: 20px; right: 20px; text-align: right; }
 .bottom-left { bottom: 20px; left: 20px; display: flex; gap: 10px; }
-.bottom-right { bottom: 20px; right: 20px; text-align: right; min-width: 150px; }
+.bottom-right { bottom: 20px; right: 20px; text-align: right; min-width: 120px; }
 
-h1 { font-size: 1.2rem; font-weight: 700; margin-bottom: 8px; color: #fff; }
-.status-indicator { font-size: 1.4rem; font-weight: 700; color: var(--avp-green); text-shadow: 0 0 10px rgba(52,199,89,0.5); }
+h1 { font-size: 1.1rem; color: var(--primary); margin-bottom: 5px; }
+.status { font-size: 1.4rem; font-weight: bold; color: #fff; text-shadow: 0 0 10px var(--primary); }
 .sub-status { font-size: 0.9rem; color: #aaa; margin-top: 4px; }
 
-ul { list-style: none; text-align: left; font-size: 0.85rem; color: #ccc; line-height: 1.6; }
-.key { display: inline-block; background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: 600; margin-right: 6px; border: 1px solid rgba(255,255,255,0.3); }
+ul { list-style: none; font-size: 0.85rem; color: #ccc; line-height: 1.8; text-align: left; }
+.key { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; color: #fff; font-weight: bold; border: 1px solid rgba(255,255,255,0.2); }
 
 button {
     background: rgba(255,255,255,0.1);
-    border: 1px solid var(--glass-border);
+    border: 1px solid var(--border);
     color: #fff;
-    padding: 8px 16px;
-    border-radius: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 0.85rem;
-    transition: 0.2s;
+    font-size: 0.8rem;
 }
-button:hover { background: rgba(255,255,255,0.25); }
+button:hover { background: rgba(255,255,255,0.2); }
 
-/* Stats */
-.bar-container { width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 6px; }
-#conf-fill { width: 0%; height: 100%; background: var(--avp-green); transition: 0.3s; }
+.bar { width: 100%; height: 4px; background: rgba(255,255,255,0.1); margin-top: 6px; border-radius: 2px; overflow: hidden; }
+#track-bar { width: 0%; height: 100%; background: var(--primary); transition: width 0.2s; }
 
-/* Overlays */
 #crosshair {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 24px; color: var(--avp-green);
-    text-shadow: 0 0 8px var(--avp-green);
+    font-size: 20px; color: var(--primary);
+    text-shadow: 0 0 8px var(--primary);
     pointer-events: none;
 }
-#prompt-overlay {
-    position: absolute; top: 60%; left: 50%;
+
+#prompt {
+    position: absolute; top: 55%; left: 50%;
     transform: translate(-50%, -50%);
     background: rgba(0,0,0,0.6);
-    padding: 8px 16px; border-radius: 20px;
-    font-size: 0.9rem; font-weight: 700; letter-spacing: 1px;
-    border: 1px solid var(--avp-green); color: var(--avp-green);
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--primary);
+    color: var(--primary);
+    font-size: 0.9rem;
     animation: pulse 1.5s infinite;
 }
+
 .hidden { display: none !important; }
 
-@keyframes pulse {
-    0% { opacity: 0.5; transform: translate(-50%, -50%) scale(0.95); }
-    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
-    100% { opacity: 0.5; transform: translate(-50%, -50%) scale(0.95); }
-}
+@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 
-/* Loading */
-#loading-screen {
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+#loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: #000; z-index: 100;
-    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
     transition: opacity 0.5s;
 }
 .spinner {
     width: 40px; height: 40px;
     border: 4px solid rgba(255,255,255,0.1);
-    border-top: 4px solid var(--avp-green);
+    border-top-color: var(--primary);
     border-radius: 50%;
     animation: spin 1s linear infinite;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
 }
-@keyframes spin { 100% { transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(360deg); } }
