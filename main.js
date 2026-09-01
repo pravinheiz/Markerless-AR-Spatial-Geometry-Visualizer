@@ -25,7 +25,7 @@ const CFG = {
 const STATE = {
     mode: 'IDLE',
     gesture: 'NONE',
-    selectedShape: 'DRAW', // Default to 3D AR Paint Mode
+    selectedShape: 'DRAW', // Default to 3D Paint Mode
     selectedMaterial: 'HOLOGRAM',
     brushColor: '#00ff88',
     brushSize: 0.06,
@@ -43,7 +43,7 @@ const STATE = {
     cameraDepth: 3.5,
     isDraggingObj: false,
     
-    // Zoom & Hologram State
+    // Zoom & Kinematic State
     hoveredUIElement: null,
     initPinchPos: null,
     initPinchScale: 1.0,
@@ -250,7 +250,7 @@ function onHandsResults(results) {
         if (STATE.showSkeleton) drawSkeleton(smoothed, idx);
     });
 
-    // PHASE 2: Primary Hand Gesture Analysis
+    // PHASE 2: Single-Hand Gesture Analysis
     const primaryLm = STATE.landmarks[0];
     const thumb = primaryLm[4];
     const index = primaryLm[8];
@@ -268,9 +268,8 @@ function onHandsResults(results) {
         getDistance(pinky, wrist) / handScale < 1.3
     );
 
-    processOculusHandPointer(index, pinchDist);
+    processOpticalUIPointer(index, pinchDist);
 
-    // ANTI-ACCIDENTAL DRAWING FILTER
     if (pinchDist < CFG.PINCH_ENTER) {
         STATE.pinchFrameCount++;
     } else if (pinchDist > CFG.PINCH_EXIT) {
@@ -288,7 +287,7 @@ function onHandsResults(results) {
         }
     }
 
-    // PHASE 3: Iron Man Dual-Hand Pinch Zoom & Scale
+    // PHASE 3: Bimanual Dual-Hand Scale & Depth Telemetry
     let isTwoHand = false;
     if (STATE.landmarks.length === 2) {
         const h1 = STATE.landmarks[0][8];
@@ -306,7 +305,7 @@ function onHandsResults(results) {
                 const p2Pinch = getDistance(STATE.landmarks[1][4], STATE.landmarks[1][8]) < CFG.PINCH_EXIT;
 
                 if (p1Pinch && p2Pinch) {
-                    STATE.gesture = 'DUAL_PINCH_ZOOM';
+                    STATE.gesture = 'BIMANUAL_SCALE';
                     STATE.mode = 'HOLOGRAPHIC';
 
                     if (STATE.initTwoHandDistance === null) {
@@ -325,13 +324,13 @@ function onHandsResults(results) {
                             updateMetricsUI(STATE.selectedObj);
 
                             rulerDisplay.classList.remove('hidden');
-                            rulerVal.innerText = `ACTIVE SHAPE SCALE: ${newScale.toFixed(2)}×`;
+                            rulerVal.innerText = `ACTIVE SCALE: ${newScale.toFixed(2)}×`;
                         } else {
                             const newZ = Math.max(1.5, Math.min(8.0, STATE.initCameraZ / ratio));
                             camera.position.z = THREE.MathUtils.lerp(camera.position.z, newZ, 0.15);
 
                             rulerDisplay.classList.remove('hidden');
-                            rulerVal.innerText = `IRON MAN SCENE ZOOM: ${ratio.toFixed(2)}×`;
+                            rulerVal.innerText = `SCENE ZOOM: ${ratio.toFixed(2)}×`;
                         }
                     }
 
@@ -360,7 +359,7 @@ function onHandsResults(results) {
         STATE.initTwoHandDistance = null;
     }
 
-    // SINGLE-HAND PINCH & PULL ZOOM (when in SELECT mode)
+    // SINGLE-HAND PINCH & PULL SCALE (when in SELECT mode)
     if (!isTwoHand && STATE.isPinching && STATE.selectedShape === 'SELECT') {
         const pPt = getSpatialPoint(index);
         if (pPt) {
@@ -370,7 +369,7 @@ function onHandsResults(results) {
             } else {
                 const dy = (pPt.y - STATE.initPinchPos.y) * 2.5;
                 if (Math.abs(dy) > 0.05) {
-                    STATE.gesture = 'SINGLE_PINCH_ZOOM';
+                    STATE.gesture = 'SINGLE_PINCH_SCALE';
                     const newScale = Math.max(0.2, Math.min(5.0, STATE.initPinchScale * (1 + dy)));
                     
                     if (STATE.selectedObj) {
@@ -381,7 +380,7 @@ function onHandsResults(results) {
                         updateMetricsUI(STATE.selectedObj);
 
                         rulerDisplay.classList.remove('hidden');
-                        rulerVal.innerText = `1-HAND ZOOM: ${newScale.toFixed(2)}×`;
+                        rulerVal.innerText = `SCALE: ${newScale.toFixed(2)}×`;
                     }
                 }
             }
@@ -389,7 +388,7 @@ function onHandsResults(results) {
     }
 
     // PHASE 4: Primary Gesture State Machine
-    if (!isTwoHand && STATE.gesture !== 'SINGLE_PINCH_ZOOM') {
+    if (!isTwoHand && STATE.gesture !== 'SINGLE_PINCH_SCALE') {
         if (STATE.isPinching) {
             STATE.gesture = 'PINCH';
             if (STATE.selectedShape === 'DRAW' && !STATE.hoveredUIElement) {
@@ -421,7 +420,7 @@ function onHandsResults(results) {
     updateUI(totalConf / (STATE.hands.length || 1));
 }
 
-function processOculusHandPointer(indexLm, pinchDist) {
+function processOpticalUIPointer(indexLm, pinchDist) {
     if (!indexLm) {
         clearUIHover();
         return;
@@ -599,7 +598,7 @@ function createMaterial(matType, customColor = null) {
 }
 
 /**
- * SECTION 4: OCULUS / SAMSUNG AR 3D PAINTING ENGINE
+ * SECTION 4: 3D SPATIAL CURVE SYNTHESIS
  */
 function getSpatialPoint(lm) {
     if (!lm) return null;
@@ -729,7 +728,7 @@ function unselectObject() {
 }
 
 /**
- * OCULUS / SAMSUNG AR 3D PAINT STROKE FINALIZER
+ * 3D VOLUMETRIC TUBE STROKE FINALIZER
  */
 function finalize3DPaintStroke() {
     if (STATE.linePoints.length >= 6) {
@@ -738,19 +737,17 @@ function finalize3DPaintStroke() {
             pts.push(new THREE.Vector3(STATE.linePoints[i], STATE.linePoints[i + 1], STATE.linePoints[i + 2]));
         }
 
-        // Remove live temporary guide line
         if (STATE.currentLine) {
             scene.remove(STATE.currentLine);
             STATE.currentLine.geometry.dispose();
         }
 
         if (pts.length >= 3) {
-            // Build smooth CatmullRom 3D Volumetric Tube Mesh
             const curve = new THREE.CatmullRomCurve3(pts);
             const geo = new THREE.TubeGeometry(curve, Math.max(32, pts.length * 3), STATE.brushSize, 10, false);
             const mat = createMaterial(STATE.selectedMaterial, STATE.brushColor);
             const paintMesh = new THREE.Mesh(geo, mat);
-            paintMesh.userData = { shapeType: '3D Paint Ribbon', isPaintStroke: true };
+            paintMesh.userData = { shapeType: '3D Spatial Ribbon', isPaintStroke: true };
 
             scene.add(paintMesh);
             STATE.objects.push(paintMesh);
@@ -967,7 +964,7 @@ function animate() {
         STATE.selectionBox.update();
     }
 
-    // EXCLUSIVE ACTIVE TARGET OBJECT MANIPULATION
+    // 6-DOF SPATIAL KINEMATIC MANIPULATION
     if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
         const primaryLm = STATE.landmarks[0];
         const index = primaryLm[8];
@@ -992,7 +989,7 @@ function animate() {
         updateMetricsUI(STATE.selectedObj);
     }
 
-    // OCULUS QUEST / SAMSUNG AR 3D PAINTING SAMPLING
+    // 3D SPATIAL CURVE SAMPLING
     if (STATE.mode === 'DRAWING' && STATE.selectedShape === 'DRAW' && STATE.landmarks[0]) {
         prompt.classList.remove('hidden');
         const pt = getSpatialPoint(STATE.landmarks[0][8]);
@@ -1012,7 +1009,6 @@ function animate() {
                 STATE.currentLine = new THREE.Line(geo, mat);
                 scene.add(STATE.currentLine);
             } else {
-                // Minimum spatial distance check (0.015u) to prevent clumping
                 const lastIdx = STATE.linePoints.length - 3;
                 const lastPt = new THREE.Vector3(STATE.linePoints[lastIdx], STATE.linePoints[lastIdx + 1], STATE.linePoints[lastIdx + 2]);
                 
@@ -1056,7 +1052,6 @@ function setupUIHandlers() {
         guideModal.classList.add('hidden');
     };
 
-    // Color Picker Buttons
     document.querySelectorAll('.color-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
@@ -1072,14 +1067,12 @@ function setupUIHandlers() {
         });
     });
 
-    // Brush Size Slider
     brushSizeSlider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         STATE.brushSize = val;
         brushSizeVal.innerText = `${val.toFixed(2)}u`;
     });
 
-    // Mode & Shape Selection
     document.querySelectorAll('.tool-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1090,7 +1083,6 @@ function setupUIHandlers() {
         });
     });
 
-    // Material Selection
     document.querySelectorAll('.mat-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
@@ -1170,11 +1162,11 @@ function deleteSelectedObject() {
 
 function updateUI(conf) {
     uiGesture.innerText = STATE.gesture;
-    uiMode.innerText = `MODE: ${STATE.selectedShape}`;
+    uiMode.innerText = `MODE: ${STATE.selectedShape === 'DRAW' ? '3D PAINT' : STATE.selectedShape}`;
 
     if (STATE.gesture === 'PINCH') uiGesture.style.color = '#ffaa00';
     else if (STATE.gesture === 'GRAB') uiGesture.style.color = '#ff3366';
-    else if (STATE.gesture === 'TWO_HAND' || STATE.gesture === 'DUAL_PINCH_ZOOM' || STATE.gesture === 'SINGLE_PINCH_ZOOM') uiGesture.style.color = '#00ccff';
+    else if (STATE.gesture === 'TWO_HAND' || STATE.gesture === 'BIMANUAL_SCALE' || STATE.gesture === 'SINGLE_PINCH_SCALE') uiGesture.style.color = '#00ccff';
     else uiGesture.style.color = '#00ff88';
 
     const pct = Math.min(100, Math.round(conf * 100));

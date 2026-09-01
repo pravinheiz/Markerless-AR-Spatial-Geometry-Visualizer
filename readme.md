@@ -5,20 +5,20 @@
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Hands-orange.svg)](https://developers.google.com/mediapipe)
 [![Web-AR](https://img.shields.io/badge/Platform-Web--AR-brightgreen.svg)]()
 
-A high-performance, browser-based **Markerless Augmented Reality (AR) Spatial Geometry Visualizer & 3D Painter**. Create, manipulate, paint, and mathematically analyze 3D spatial geometry in mid-air using your hands through a standard webcam without needing controllers, physical markers, or expensive AR glasses.
+A high-performance, browser-based **Markerless Augmented Reality (AR) Spatial Geometry Visualizer & 3D Curve Synthesis Engine**. Create, manipulate, paint, and mathematically analyze 3D spatial geometry in mid-air using real-time computer vision hand tracking through a standard webcam without requiring controllers, physical fiducial markers, or expensive AR headsets.
 
 ---
 
-## 🌟 Key Features
+## 🌟 Key Capabilities & Features
 
-- 🖐️ **Markerless 3D Hand Tracking**: Real-time 21-keypoint hand landmark tracking powered by MediaPipe ML.
-- 🎨 **Oculus & Samsung AR 3D Painting**: Paint volumetric 3D neon ribbons and tubes in spatial depth using single-hand pinch gestures.
-- ✊ **Tony Stark 6-DOF Hologram Manipulation**: Natural single-hand wrist-tilt orientation (Pitch, Yaw, Roll) and 3D translation.
-- 🤏🤏 **Iron Man Dual-Hand Pinch Zoom**: Spread or close pinched hands to dynamically scale active holograms or zoom the scene.
+- 🖐️ **Markerless 3D Hand Tracking**: Real-time 21-keypoint hand landmark tracking powered by client-side MediaPipe ML neural networks (60 FPS, sub-20ms latency).
+- 🎨 **Volumetric 3D Spatial Curve Synthesis**: Synthesize continuous 3D volumetric neon ribbons and tubes in spatial depth using single-hand pinch gestures.
+- ✊ **6-DOF Spatial Kinematic Manipulation**: Natural single-hand wrist-tilt orientation (Pitch, Yaw, Roll) and 3D translation.
+- 🤏🤏 **Bimanual Dual-Pinch Zoom**: Spread or close pinched hands to dynamically scale active 3D geometry or zoom the scene camera.
 - 📊 **Real-Time Spatial Geometry Analytics HUD**: Live computation of mathematical Volume ($V$), Surface Area ($A$), Centroid, Bounding Box ($W \times H \times D$), and vertex/edge counts.
 - 📏 **AR 2-Hand Laser Ruler**: Measure physical 3D distance between your hands in real-time with sub-centimeter telemetry.
-- 🌈 **Shader & Color Palette**: Hologram Wireframe, Physical Glass, Metallic Chrome, and Neon Glow materials with a 6-color brush palette.
-- 🔊 **Pure Web Audio Synthesizer**: Clean synthesized sci-fi sound effects without external audio assets.
+- 🌈 **Material Shaders & Color Palette**: Hologram Wireframe, Physical Glass, Metallic Chrome, and Neon Glow shaders with a 6-color brush palette.
+- 🔊 **Pure Web Audio Synthesizer**: Clean synthesized audio feedback waveforms without external asset dependencies.
 - 💻 **Desktop Mouse & Touch Fallback**: Interactive 3D manipulation mode with Three.js OrbitControls if webcam is unavailable.
 
 ---
@@ -27,16 +27,16 @@ A high-performance, browser-based **Markerless Augmented Reality (AR) Spatial Ge
 
 | Gesture | Icon | Action & Description |
 | :--- | :---: | :--- |
-| **Single Pinch** | 🤏 | Paint 3D volumetric ribbon (in `🎨 3D Paint` mode) or click UI buttons. |
+| **Single Pinch** | 🤏 | Synthesize 3D volumetric ribbon (in `🎨 3D Paint` mode) or activate UI buttons. |
 | **Fist / Grab** | ✊ | Grab active 3D hologram for 6-DOF translation and 3D wrist-tilt rotation. |
-| **Dual-Hand Pinch** | 🤏🤏 | Iron Man Pinch Zoom to scale the active shape or zoom the scene. |
-| **2-Hand Vertical** | ↕️ | Extrude drawn 2D curves into solid 3D tubes. |
+| **Dual-Hand Pinch** | 🤏🤏 | Bimanual Dual-Pinch Scale to dynamically scale the active geometry or zoom scene. |
+| **2-Hand Vertical** | ↕️ | Extrude drawn 2D planar profiles into solid 3D tubes. |
 | **2-Hand Spread** | 📏 | Measure real-time spatial distance between hands in meters. |
-| **Open Palm Pointer** | 🖐️ | Oculus Quest index fingertip cursor for hovering and selecting. |
+| **Open Palm Pointer** | 🖐️ | Optical index fingertip cursor for contactless hovering and selecting. |
 
 ---
 
-## 🚀 Quick Start / Local Installation
+## 🚀 Quick Start / Local Setup
 
 No build steps or complex dependencies required. Simply serve the repository with any local static HTTP server:
 
@@ -57,16 +57,7 @@ npx serve .
 ```
 
 ### 3. Open in Browser
-- **Live AR Visualizer Application**: Open `http://localhost:8080/index.html`
-- **10-Slide Project Presentation Deck**: Open `http://localhost:8080/slides.html`
-
----
-
-## 📽️ Project Presentation Slides
-
-The project includes an interactive 10-slide presentation deck:
-- Interactive HTML Slide Deck: [`slides.html`](slides.html)
-- Slide Deck Documentation & Speaker Notes: [`presentation_slides.md`](presentation_slides.md)
+- Open `http://localhost:8080` in any modern web browser.
 
 ---
 
@@ -82,3 +73,10 @@ The project includes an interactive 10-slide presentation deck:
 ## 📄 License
 
 MIT License — Feel free to use and expand for academic, research, and open-source projects!
+
+---
+
+## 🌐 Complete Code Repository Location
+
+The complete, open-source codebase for this project is hosted on GitHub:  
+👉 **[https://github.com/pravinheiz/Markerless-AR-Spatial-Geometry-Visualizer](https://github.com/pravinheiz/Markerless-AR-Spatial-Geometry-Visualizer)**

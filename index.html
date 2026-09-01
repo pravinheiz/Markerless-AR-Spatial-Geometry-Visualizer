@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Spatial Geometry Visualizer</title>
+    <title>Markerless AR Spatial Geometry Visualizer</title>
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,7 +54,7 @@
             <div class="panel-body">
                 <div class="status-box">
                     <div id="gesture-display" class="status">INITIALIZING...</div>
-                    <div id="mode-display" class="sub-status">MODE: AR PAINT</div>
+                    <div id="mode-display" class="sub-status">MODE: 3D SPATIAL PAINT</div>
                 </div>
                 <div class="tracking-meter">
                     <div class="track-info">
@@ -78,12 +78,12 @@
                 <div class="tool-group">
                     <div class="tool-label">INTERACTION MODE</div>
                     <div class="grid-buttons mode-grid">
-                        <button class="tool-btn active" data-shape="DRAW" title="Oculus / Samsung AR 3D Paint Mode">🎨 3D Paint</button>
-                        <button class="tool-btn" data-shape="SELECT" title="Select / Move / Rotate Mode">👆 Select / Grab</button>
+                        <button class="tool-btn active" data-shape="DRAW" title="3D Spatial Curve Synthesis Mode">🎨 3D Paint</button>
+                        <button class="tool-btn" data-shape="SELECT" title="6-DOF Select & Manipulate Mode">👆 Select / Grab</button>
                     </div>
                 </div>
 
-                <!-- 3D AR PAINT BRUSH CONTROLS (Active in 3D Paint mode) -->
+                <!-- 3D AR PAINT BRUSH CONTROLS -->
                 <div class="tool-group brush-controls">
                     <div class="tool-label">3D BRUSH COLOR</div>
                     <div class="color-picker-row">
@@ -143,7 +143,7 @@
 
                 <!-- QUICK CONTROLS -->
                 <div class="controls-guide">
-                    <button id="btn-guide-toggle" class="btn-action primary-glow" title="View Hand Gesture Guide">❓ Gesture Guide</button>
+                    <button id="btn-guide-toggle" class="btn-action primary-glow" title="View Gesture Reference Guide">❓ Gesture Guide</button>
                 </div>
             </div>
         </div>
@@ -176,16 +176,16 @@
 
         <!-- DYNAMIC OVERLAYS -->
         <div id="ruler-display" class="ruler-pill hidden">
-            <span>SCALE: </span><strong id="ruler-val">1.00×</strong>
+            <span>SCALE / DIST: </span><strong id="ruler-val">1.00×</strong>
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">PINCH & MOVE HAND TO PAINT IN 3D</div>
+        <div id="prompt" class="hidden">PINCH & MOVE HAND TO SYNTHESIZE 3D CURVE</div>
 
         <!-- INTERACTIVE GESTURE HELP GUIDE MODAL -->
         <div id="gesture-guide-modal" class="modal-card hidden glow-card">
             <div class="modal-header">
-                <h2>🖐️ OCULUS / SAMSUNG AR PAINT & GESTURE GUIDE</h2>
+                <h2>🖐️ SPATIAL GESTURE INTERACTION GUIDE</h2>
                 <button id="btn-close-guide" class="btn-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -193,43 +193,43 @@
                     <div class="gesture-card">
                         <div class="g-icon">🎨</div>
                         <div class="g-info">
-                            <strong>3D AR Painting (Oculus / Samsung style)</strong>
-                            <p>Pinch thumb & index finger in 3D Paint mode and move your hand to paint 3D volumetric neon ribbons in spatial space!</p>
+                            <strong>3D Spatial Curve Synthesis</strong>
+                            <p>Pinch thumb & index finger in 3D Paint mode and move hand to generate volumetric 3D ribbons in spatial depth.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">👆</div>
                         <div class="g-info">
-                            <strong>Select / Move Mode</strong>
-                            <p>Switch to Select mode to grab, move, and rotate objects without painting.</p>
+                            <strong>Select / Manipulate Mode</strong>
+                            <p>Switch to Select mode to translate, rotate, and scale 3D geometry without drawing.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">✊</div>
                         <div class="g-info">
-                            <strong>Tony Stark Hologram Grab</strong>
-                            <p>Locks focus on active object for 6-DOF translation & 3D wrist tilt rotation (Pitch, Yaw, Roll).</p>
+                            <strong>6-DOF Spatial Kinematic Grab</strong>
+                            <p>Locks focus on active object for 6-DOF translation & 3D wrist-tilt orientation (Pitch, Yaw, Roll).</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">🤏🤏</div>
                         <div class="g-info">
-                            <strong>Dual-Hand Pinch Zoom</strong>
-                            <p>Spread or close 2 pinched hands to scale active target object or scene like Iron Man.</p>
+                            <strong>Bimanual Dual-Pinch Scale</strong>
+                            <p>Spread or close 2 pinched hands to scale the active target object or zoom scene camera.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">↕️</div>
                         <div class="g-info">
-                            <strong>Dual Vertical Motion</strong>
-                            <p>Extrude drawn 2D curves into 3D volumetric tube meshes.</p>
+                            <strong>Dual-Hand Spline Extrusion</strong>
+                            <p>Extrude drawn 2D planar profiles into solid 3D volumetric tube meshes.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">🖐️</div>
                         <div class="g-info">
-                            <strong>Oculus Hand Pointer</strong>
-                            <p>Index fingertip pointer for hovering and clicking UI buttons without accidental drawing.</p>
+                            <strong>Contactless Optical UI Pointer</strong>
+                            <p>Index fingertip raycast cursor for hovering and activating UI controls.</p>
                         </div>
                     </div>
                 </div>
@@ -243,7 +243,7 @@
         <div class="loader-content">
             <div class="spinner"></div>
             <h2>Initializing AR Vision & Spatial System</h2>
-            <p>Requesting camera access for gesture tracking...</p>
+            <p>Calibrating camera stream and spatial neural pipeline...</p>
             <div class="fallback-note">Desktop / Mouse testing supported automatically if camera is disabled.</div>
         </div>
     </div>
