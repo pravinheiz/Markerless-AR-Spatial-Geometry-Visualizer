@@ -1,3 +1,13 @@
-Since the only file change is the addition of `.gitignore` itself and there are no other file changes provided in the list, there are no build artifacts, dependencies, or temporary files to ignore. The current .gitignore is empty and there are no relevant files to add to it based on the change list.
+# Presentations & Local Submission Artifacts
+*.pptx
+*.ppt
+generate_presentation.py
+presentation_slides.md
+slides.html
 
-Therefore, the optimized .gitignore content is empty.
+# Node & Python caches
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
