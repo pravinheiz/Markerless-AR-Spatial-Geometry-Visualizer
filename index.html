@@ -54,7 +54,7 @@
             <div class="panel-body">
                 <div class="status-box">
                     <div id="gesture-display" class="status">INITIALIZING...</div>
-                    <div id="mode-display" class="sub-status">MODE: SELECT</div>
+                    <div id="mode-display" class="sub-status">MODE: AR PAINT</div>
                 </div>
                 <div class="tracking-meter">
                     <div class="track-info">
@@ -73,12 +73,38 @@
                 <button class="btn-toggle-panel" data-target="panel-toolkit" title="Collapse panel">−</button>
             </div>
             <div class="panel-body">
-                <!-- SHAPES PRIMITIVES TOOLBAR -->
+                
+                <!-- PRIMARY MODE SELECTOR -->
                 <div class="tool-group">
-                    <div class="tool-label">MODE / SPAWN SHAPE</div>
+                    <div class="tool-label">INTERACTION MODE</div>
+                    <div class="grid-buttons mode-grid">
+                        <button class="tool-btn active" data-shape="DRAW" title="Oculus / Samsung AR 3D Paint Mode">🎨 3D Paint</button>
+                        <button class="tool-btn" data-shape="SELECT" title="Select / Move / Rotate Mode">👆 Select / Grab</button>
+                    </div>
+                </div>
+
+                <!-- 3D AR PAINT BRUSH CONTROLS (Active in 3D Paint mode) -->
+                <div class="tool-group brush-controls">
+                    <div class="tool-label">3D BRUSH COLOR</div>
+                    <div class="color-picker-row">
+                        <button class="color-btn active" data-color="#00ff88" style="background: #00ff88;" title="Neon Green"></button>
+                        <button class="color-btn" data-color="#00ccff" style="background: #00ccff;" title="Cyan"></button>
+                        <button class="color-btn" data-color="#b026ff" style="background: #b026ff;" title="Electric Purple"></button>
+                        <button class="color-btn" data-color="#ffaa00" style="background: #ffaa00;" title="Gold"></button>
+                        <button class="color-btn" data-color="#ff3366" style="background: #ff3366;" title="Hot Pink"></button>
+                        <button class="color-btn" data-color="#ffffff" style="background: #ffffff;" title="Pure White"></button>
+                    </div>
+                    <div class="slider-row margin-top">
+                        <span>Size:</span>
+                        <input type="range" id="brush-size-slider" min="0.02" max="0.25" step="0.01" value="0.06">
+                        <span id="brush-size-val" class="slider-val">0.06u</span>
+                    </div>
+                </div>
+
+                <!-- 3D SHAPE PRIMITIVES -->
+                <div class="tool-group">
+                    <div class="tool-label">SPAWN 3D SHAPES</div>
                     <div class="grid-buttons">
-                        <button class="tool-btn active" data-shape="SELECT" title="Default Select / Grab Mode (No accidental drawing)">👆 Select / Grab</button>
-                        <button class="tool-btn" data-shape="DRAW" title="Explicit 3D Draw Mode">✏️ Draw 3D</button>
                         <button class="tool-btn" data-shape="CUBE" title="Spawn Cube">🧊 Cube</button>
                         <button class="tool-btn" data-shape="SPHERE" title="Spawn Sphere">🔮 Sphere</button>
                         <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
@@ -124,7 +150,7 @@
 
         <!-- BOTTOM LEFT: Scene Action Buttons -->
         <div class="panel bottom-left glow-card">
-            <button id="btn-extrude" class="btn-action" title="Extrude last drawn line into 3D volume">✨ Extrude Line</button>
+            <button id="btn-extrude" class="btn-action" title="Smooth / Extrude last stroke">✨ Extrude Stroke</button>
             <button id="btn-reset" class="btn-action danger" title="Clear all objects">🗑️ Clear Scene</button>
             <button id="btn-skeleton" class="btn-action">🖐️ Skeleton: ON</button>
             <button id="btn-sfx" class="btn-action">🔊 SFX: ON</button>
@@ -150,39 +176,39 @@
 
         <!-- DYNAMIC OVERLAYS -->
         <div id="ruler-display" class="ruler-pill hidden">
-            <span>ZOOM / SCALE: </span><strong id="ruler-val">1.00×</strong>
+            <span>SCALE: </span><strong id="ruler-val">1.00×</strong>
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">DRAWING ACTIVE</div>
+        <div id="prompt" class="hidden">PINCH & MOVE HAND TO PAINT IN 3D</div>
 
         <!-- INTERACTIVE GESTURE HELP GUIDE MODAL -->
         <div id="gesture-guide-modal" class="modal-card hidden glow-card">
             <div class="modal-header">
-                <h2>🖐️ IRON MAN GESTURE HELP GUIDE</h2>
+                <h2>🖐️ OCULUS / SAMSUNG AR PAINT & GESTURE GUIDE</h2>
                 <button id="btn-close-guide" class="btn-close">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="gesture-grid">
                     <div class="gesture-card">
-                        <div class="g-icon">👆</div>
+                        <div class="g-icon">🎨</div>
                         <div class="g-info">
-                            <strong>Select / Grab Mode</strong>
-                            <p>Default active mode. Prevents accidental drawing when waving hand in front of camera.</p>
+                            <strong>3D AR Painting (Oculus / Samsung style)</strong>
+                            <p>Pinch thumb & index finger in 3D Paint mode and move your hand to paint 3D volumetric neon ribbons in spatial space!</p>
                         </div>
                     </div>
                     <div class="gesture-card">
-                        <div class="g-icon">🤏</div>
+                        <div class="g-icon">👆</div>
                         <div class="g-info">
-                            <strong>Single Pinch & Pull</strong>
-                            <p>Draw 3D curves (in Draw mode) or Pull forward/backward to Zoom active object (in Select mode).</p>
+                            <strong>Select / Move Mode</strong>
+                            <p>Switch to Select mode to grab, move, and rotate objects without painting.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">✊</div>
                         <div class="g-info">
-                            <strong>Targeted Hologram Grab</strong>
-                            <p>Locks focus on active object for 6-DOF translation & 3D wrist tilt rotation.</p>
+                            <strong>Tony Stark Hologram Grab</strong>
+                            <p>Locks focus on active object for 6-DOF translation & 3D wrist tilt rotation (Pitch, Yaw, Roll).</p>
                         </div>
                     </div>
                     <div class="gesture-card">
@@ -196,7 +222,7 @@
                         <div class="g-icon">↕️</div>
                         <div class="g-info">
                             <strong>Dual Vertical Motion</strong>
-                            <p>Extrude drawn 2D curves into 3D volumetric tubes.</p>
+                            <p>Extrude drawn 2D curves into 3D volumetric tube meshes.</p>
                         </div>
                     </div>
                     <div class="gesture-card">

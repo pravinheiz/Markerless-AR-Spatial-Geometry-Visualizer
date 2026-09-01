@@ -6,7 +6,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
  */
 const CFG = {
     SMOOTHING: 0.35,
-    PINCH_ENTER: 0.038, // Tight pinch to prevent accidental triggers during hand waving
+    PINCH_ENTER: 0.038,
     PINCH_EXIT: 0.058,
     GRAB_DIST: 0.28,
     ROT_SENS: 0.08,
@@ -23,14 +23,16 @@ const CFG = {
  * STATE MANAGEMENT
  */
 const STATE = {
-    mode: 'IDLE', // IDLE, DRAWING, GRABBED, EXTRUDING, MEASURING, HOLOGRAPHIC
+    mode: 'IDLE',
     gesture: 'NONE',
-    selectedShape: 'SELECT', // Default to SELECT/GRAB mode to prevent accidental drawing when waving hand!
+    selectedShape: 'DRAW', // Default to 3D AR Paint Mode
     selectedMaterial: 'HOLOGRAM',
+    brushColor: '#00ff88',
+    brushSize: 0.06,
     hands: [],
     landmarks: [],
     objects: [],
-    selectedObj: null, // Active Target Object (Iron Man single object isolation)
+    selectedObj: null,
     selectionBox: null,
     currentLine: null,
     linePoints: [],
@@ -41,7 +43,7 @@ const STATE = {
     cameraDepth: 3.5,
     isDraggingObj: false,
     
-    // Single-Hand & Dual-Hand Zoom State
+    // Zoom & Hologram State
     hoveredUIElement: null,
     initPinchPos: null,
     initPinchScale: 1.0,
@@ -74,7 +76,9 @@ const mArea = document.getElementById('m-area');
 const mBounds = document.getElementById('m-bounds');
 const mVerts = document.getElementById('m-verts');
 
-// TRANSFORM SLIDER & BUTTONS
+// BRUSH & TRANSFORM CONTROLS
+const brushSizeSlider = document.getElementById('brush-size-slider');
+const brushSizeVal = document.getElementById('brush-size-val');
 const scaleSlider = document.getElementById('scale-slider');
 const scaleVal = document.getElementById('scale-val');
 
@@ -112,14 +116,14 @@ function playSound(type) {
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         osc.start(now);
         osc.stop(now + 0.1);
-    } else if (type === 'autocomplete') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(400, now);
-        osc.frequency.exponentialRampToValueAtTime(800, now + 0.2);
-        gain.gain.setValueAtTime(0.25, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+    } else if (type === 'paint') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(350, now);
+        osc.frequency.linearRampToValueAtTime(700, now + 0.08);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.08);
         osc.start(now);
-        osc.stop(now + 0.2);
+        osc.stop(now + 0.08);
     } else if (type === 'spawn') {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(300, now);
@@ -221,7 +225,7 @@ function onHandsResults(results) {
 
     if (STATE.hands.length === 0) {
         STATE.gesture = 'NONE';
-        if (STATE.mode === 'DRAWING') finalizeDrawing();
+        if (STATE.mode === 'DRAWING') finalize3DPaintStroke();
         if (STATE.mode === 'GRABBED') unselectObject();
         if (laserLine) laserLine.visible = false;
         rulerDisplay.classList.add('hidden');
@@ -266,7 +270,7 @@ function onHandsResults(results) {
 
     processOculusHandPointer(index, pinchDist);
 
-    // ANTI-ACCIDENTAL DRAWING: Require tight pinch held for 2+ consecutive frames
+    // ANTI-ACCIDENTAL DRAWING FILTER
     if (pinchDist < CFG.PINCH_ENTER) {
         STATE.pinchFrameCount++;
     } else if (pinchDist > CFG.PINCH_EXIT) {
@@ -284,7 +288,7 @@ function onHandsResults(results) {
         }
     }
 
-    // PHASE 3: Iron Man Single-Hand Pinch & Pull Zoom + 2-Hand Zoom
+    // PHASE 3: Iron Man Dual-Hand Pinch Zoom & Scale
     let isTwoHand = false;
     if (STATE.landmarks.length === 2) {
         const h1 = STATE.landmarks[0][8];
@@ -313,7 +317,6 @@ function onHandsResults(results) {
                         const ratio = currentDist / STATE.initTwoHandDistance;
 
                         if (STATE.selectedObj) {
-                            // Scale Exclusive Active Target Object ONLY
                             const newScale = Math.max(0.2, Math.min(5.0, STATE.initTwoHandScale * ratio));
                             STATE.selectedObj.scale.set(newScale, newScale, newScale);
                             if (STATE.selectionBox) STATE.selectionBox.update();
@@ -357,7 +360,7 @@ function onHandsResults(results) {
         STATE.initTwoHandDistance = null;
     }
 
-    // SINGLE-HAND PINCH & PULL ZOOM (when in SELECT mode or active object selected)
+    // SINGLE-HAND PINCH & PULL ZOOM (when in SELECT mode)
     if (!isTwoHand && STATE.isPinching && STATE.selectedShape === 'SELECT') {
         const pPt = getSpatialPoint(index);
         if (pPt) {
@@ -365,7 +368,6 @@ function onHandsResults(results) {
                 STATE.initPinchPos = pPt.clone();
                 STATE.initPinchScale = STATE.selectedObj ? STATE.selectedObj.scale.x : 1.0;
             } else {
-                // Vertical / Z depth pinch drag distance
                 const dy = (pPt.y - STATE.initPinchPos.y) * 2.5;
                 if (Math.abs(dy) > 0.05) {
                     STATE.gesture = 'SINGLE_PINCH_ZOOM';
@@ -398,7 +400,6 @@ function onHandsResults(results) {
                 spawnShapePrimitive(STATE.selectedShape, index);
                 STATE.isPinching = false;
             } else if (STATE.selectedShape === 'SELECT' && !STATE.hoveredUIElement) {
-                // Try selecting target shape under index finger
                 selectNearestObject(index);
             }
         } else if (isGrabbed) {
@@ -412,7 +413,7 @@ function onHandsResults(results) {
             }
         } else {
             STATE.gesture = 'OPEN';
-            if (STATE.mode === 'DRAWING') finalizeDrawing();
+            if (STATE.mode === 'DRAWING') finalize3DPaintStroke();
             if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         }
     }
@@ -429,7 +430,7 @@ function processOculusHandPointer(indexLm, pinchDist) {
     const screenY = indexLm.y * window.innerHeight;
 
     const elem = document.elementFromPoint(screenX, screenY);
-    const targetBtn = elem ? elem.closest('button, .tool-btn, .mat-btn, .btn-action, .sm-btn, .btn-toggle-panel') : null;
+    const targetBtn = elem ? elem.closest('button, .tool-btn, .mat-btn, .btn-action, .sm-btn, .btn-toggle-panel, .color-btn') : null;
 
     if (targetBtn) {
         if (STATE.hoveredUIElement !== targetBtn) {
@@ -556,11 +557,13 @@ function initThree() {
     setupMouseInteractions();
 }
 
-function createMaterial(matType) {
+function createMaterial(matType, customColor = null) {
+    const col = customColor ? parseInt(customColor.replace('#', '0x')) : CFG.COLORS.ACCENT;
+
     switch (matType) {
         case 'GLASS':
             return new THREE.MeshPhysicalMaterial({
-                color: CFG.COLORS.GLASS,
+                color: col,
                 metalness: 0.1,
                 roughness: 0.1,
                 transmission: 0.85,
@@ -571,32 +574,32 @@ function createMaterial(matType) {
             });
         case 'METAL':
             return new THREE.MeshStandardMaterial({
-                color: 0xcccccc,
+                color: col,
                 metalness: 0.9,
                 roughness: 0.2,
                 wireframe: false
             });
         case 'NEON':
             return new THREE.MeshStandardMaterial({
-                color: CFG.COLORS.PRIMARY,
-                emissive: CFG.COLORS.PRIMARY,
-                emissiveIntensity: 0.6,
-                roughness: 0.3,
+                color: col,
+                emissive: col,
+                emissiveIntensity: 0.7,
+                roughness: 0.2,
                 wireframe: false
             });
         case 'HOLOGRAM':
         default:
             return new THREE.MeshStandardMaterial({
-                color: CFG.COLORS.ACCENT,
-                emissive: CFG.COLORS.ACCENT,
-                emissiveIntensity: 0.4,
+                color: col,
+                emissive: col,
+                emissiveIntensity: 0.5,
                 wireframe: true
             });
     }
 }
 
 /**
- * SECTION 4: SPATIAL RAYCASTING & SINGLE ACTIVE OBJECT ISOLATION
+ * SECTION 4: OCULUS / SAMSUNG AR 3D PAINTING ENGINE
  */
 function getSpatialPoint(lm) {
     if (!lm) return null;
@@ -655,7 +658,7 @@ function spawnShapePrimitive(type, lm) {
             return;
     }
 
-    const mat = createMaterial(STATE.selectedMaterial);
+    const mat = createMaterial(STATE.selectedMaterial, STATE.brushColor);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pt);
     mesh.castShadow = true;
@@ -686,7 +689,6 @@ function selectNearestObject(indexLm) {
     if (closest) selectObject(closest);
 }
 
-// IRON MAN SINGLE ACTIVE OBJECT FOCUS
 function selectObject(obj) {
     if (STATE.selectedObj && STATE.selectedObj !== obj) {
         unselectObject();
@@ -715,7 +717,7 @@ function selectObject(obj) {
 function unselectObject() {
     if (STATE.selectedObj) {
         if (STATE.selectedObj.material && STATE.selectedObj.material.emissive) {
-            const hex = STATE.selectedMaterial === 'NEON' ? CFG.COLORS.PRIMARY : (STATE.selectedMaterial === 'HOLOGRAM' ? CFG.COLORS.ACCENT : 0x000000);
+            const hex = STATE.selectedMaterial === 'NEON' ? parseInt(STATE.brushColor.replace('#', '0x')) : 0x000000;
             STATE.selectedObj.material.emissive.setHex(hex);
         }
         STATE.selectedObj = null;
@@ -726,76 +728,45 @@ function unselectObject() {
     updateMetricsUI(null);
 }
 
-function finalizeDrawing() {
-    if (STATE.currentLine && STATE.linePoints.length >= 6) {
+/**
+ * OCULUS / SAMSUNG AR 3D PAINT STROKE FINALIZER
+ */
+function finalize3DPaintStroke() {
+    if (STATE.linePoints.length >= 6) {
         const pts = [];
         for (let i = 0; i < STATE.linePoints.length; i += 3) {
             pts.push(new THREE.Vector3(STATE.linePoints[i], STATE.linePoints[i + 1], STATE.linePoints[i + 2]));
         }
 
-        const startPt = pts[0];
-        const endPt = pts[pts.length - 1];
-        const distStartEnd = startPt.distanceTo(endPt);
-
-        const bbox = new THREE.Box3().setFromPoints(pts);
-        const center = new THREE.Vector3();
-        bbox.getCenter(center);
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-
-        scene.remove(STATE.currentLine);
-        STATE.currentLine.geometry.dispose();
-
-        if (distStartEnd < 0.65 || pts.length > 25) {
-            const radii = pts.map(p => p.distanceTo(center));
-            const avgRadius = radii.reduce((a, b) => a + b, 0) / radii.length;
-            const radiusVariance = radii.reduce((acc, r) => acc + Math.abs(r - avgRadius), 0) / radii.length;
-            const varianceRatio = radiusVariance / avgRadius;
-
-            let completedMesh;
-            if (varianceRatio < 0.28) {
-                const geo = new THREE.SphereGeometry(avgRadius, 32, 32);
-                const mat = createMaterial(STATE.selectedMaterial);
-                completedMesh = new THREE.Mesh(geo, mat);
-                completedMesh.userData = { shapeType: 'Auto-Sphere', isPrimitive: true };
-                playSound('autocomplete');
-            } else {
-                const maxDim = Math.max(size.x, size.y, size.z, 0.4);
-                const geo = new THREE.BoxGeometry(maxDim, maxDim, maxDim);
-                const mat = createMaterial(STATE.selectedMaterial);
-                completedMesh = new THREE.Mesh(geo, mat);
-                completedMesh.userData = { shapeType: 'Auto-Cube', isPrimitive: true };
-                playSound('autocomplete');
-            }
-
-            completedMesh.position.copy(center);
-            scene.add(completedMesh);
-            STATE.objects.push(completedMesh);
-            selectObject(completedMesh);
-
-        } else {
-            const curve = new THREE.CatmullRomCurve3(pts);
-            const smoothPts = curve.getPoints(64);
-            const geo = new THREE.BufferGeometry().setFromPoints(smoothPts);
-            const mat = new THREE.LineBasicMaterial({ color: CFG.COLORS.PRIMARY, linewidth: 3 });
-            const line = new THREE.Line(geo, mat);
-            line.userData = { shapeType: 'Smooth 3D Curve' };
-
-            scene.add(line);
-            STATE.objects.push(line);
-            selectObject(line);
+        // Remove live temporary guide line
+        if (STATE.currentLine) {
+            scene.remove(STATE.currentLine);
+            STATE.currentLine.geometry.dispose();
         }
 
-        STATE.currentLine = null;
-        STATE.linePoints = [];
+        if (pts.length >= 3) {
+            // Build smooth CatmullRom 3D Volumetric Tube Mesh
+            const curve = new THREE.CatmullRomCurve3(pts);
+            const geo = new THREE.TubeGeometry(curve, Math.max(32, pts.length * 3), STATE.brushSize, 10, false);
+            const mat = createMaterial(STATE.selectedMaterial, STATE.brushColor);
+            const paintMesh = new THREE.Mesh(geo, mat);
+            paintMesh.userData = { shapeType: '3D Paint Ribbon', isPaintStroke: true };
+
+            scene.add(paintMesh);
+            STATE.objects.push(paintMesh);
+            selectObject(paintMesh);
+            playSound('paint');
+        }
     }
+    STATE.currentLine = null;
+    STATE.linePoints = [];
     STATE.mode = 'IDLE';
 }
 
 function extrudeLastLine() {
     if (!STATE.objects.length) return;
     const targetObj = STATE.selectedObj || STATE.objects[STATE.objects.length - 1];
-    if (!targetObj || targetObj.type !== 'Line' || targetObj.userData.isExtruded) return;
+    if (!targetObj || targetObj.type !== 'Line') return;
 
     const posAttr = targetObj.geometry.attributes.position;
     if (!posAttr || posAttr.count < 2) return;
@@ -806,12 +777,12 @@ function extrudeLastLine() {
     }
 
     const curve = new THREE.CatmullRomCurve3(pts);
-    const geo = new THREE.TubeGeometry(curve, 64, 0.07, 12, false);
-    const mat = createMaterial(STATE.selectedMaterial);
+    const geo = new THREE.TubeGeometry(curve, 64, STATE.brushSize, 12, false);
+    const mat = createMaterial(STATE.selectedMaterial, STATE.brushColor);
     const mesh = new THREE.Mesh(geo, mat);
 
     mesh.position.copy(targetObj.position);
-    mesh.userData = { shapeType: 'Extruded Tube', isExtruded: true };
+    mesh.userData = { shapeType: 'Extruded Ribbon', isExtruded: true };
 
     scene.remove(targetObj);
     targetObj.geometry.dispose();
@@ -845,7 +816,7 @@ function updateLaserLine(p1, p2) {
 }
 
 /**
- * SECTION 5: MOUSE / POINTER INTERACTION
+ * SECTION 5: MOUSE INTERACTION
  */
 function setupMouseInteractions() {
     let activePointerDown = false;
@@ -951,10 +922,10 @@ function computeMeshMetrics(geo, type, size) {
         edges = Math.round(vertices * 1.5);
     }
 
-    if (type === 'CUBE' || type === 'Auto-Cube') {
+    if (type === 'CUBE') {
         volume = size.x * size.y * size.z;
         area = 2 * (size.x * size.y + size.y * size.z + size.z * size.x);
-    } else if (type === 'SPHERE' || type === 'Auto-Sphere') {
+    } else if (type === 'SPHERE') {
         const r = size.x / 2;
         volume = (4 / 3) * Math.PI * Math.pow(r, 3);
         area = 4 * Math.PI * Math.pow(r, 2);
@@ -982,7 +953,7 @@ function computeMeshMetrics(geo, type, size) {
 }
 
 /**
- * SECTION 7: ANIMATION LOOP & EXCLUSIVE ACTIVE OBJECT FOCUS
+ * SECTION 7: ANIMATION LOOP & 3D PAINT SAMPLING
  */
 function animate() {
     requestAnimationFrame(animate);
@@ -996,7 +967,7 @@ function animate() {
         STATE.selectionBox.update();
     }
 
-    // EXCLUSIVE ACTIVE TARGET OBJECT MANIPULATION (TONY STARK ISOLATION)
+    // EXCLUSIVE ACTIVE TARGET OBJECT MANIPULATION
     if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
         const primaryLm = STATE.landmarks[0];
         const index = primaryLm[8];
@@ -1005,13 +976,11 @@ function animate() {
         const pinky = primaryLm[20];
         const thumb = primaryLm[4];
 
-        // 1. Position Translation on Active Object
         const targetPos = getSpatialPoint(index);
         if (targetPos) {
             STATE.selectedObj.position.lerp(targetPos, 0.22);
         }
 
-        // 2. 6-DOF Wrist/Palm Orientation on Active Object ONLY
         const pitchAngle = (middle.y - wrist.y) * 4.0;
         const yawAngle = -(index.x - pinky.x) * 4.0;
         const rollAngle = Math.atan2(thumb.y - pinky.y, thumb.x - pinky.x);
@@ -1023,7 +992,7 @@ function animate() {
         updateMetricsUI(STATE.selectedObj);
     }
 
-    // 3D Freehand Drawing Logic (ONLY active in explicit DRAW mode)
+    // OCULUS QUEST / SAMSUNG AR 3D PAINTING SAMPLING
     if (STATE.mode === 'DRAWING' && STATE.selectedShape === 'DRAW' && STATE.landmarks[0]) {
         prompt.classList.remove('hidden');
         const pt = getSpatialPoint(STATE.landmarks[0][8]);
@@ -1038,14 +1007,20 @@ function animate() {
                 STATE.linePoints = [pt.x, pt.y, pt.z];
                 const geo = new THREE.BufferGeometry();
                 geo.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
-                const mat = new THREE.LineBasicMaterial({ color: CFG.COLORS.PRIMARY, linewidth: 3 });
+                const colHex = parseInt(STATE.brushColor.replace('#', '0x'));
+                const mat = new THREE.LineBasicMaterial({ color: colHex, linewidth: 4 });
                 STATE.currentLine = new THREE.Line(geo, mat);
-                STATE.currentLine.userData = { shapeType: 'Freehand Line' };
                 scene.add(STATE.currentLine);
             } else {
-                STATE.linePoints.push(pt.x, pt.y, pt.z);
-                STATE.currentLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
-                STATE.currentLine.geometry.setDrawRange(0, STATE.linePoints.length / 3);
+                // Minimum spatial distance check (0.015u) to prevent clumping
+                const lastIdx = STATE.linePoints.length - 3;
+                const lastPt = new THREE.Vector3(STATE.linePoints[lastIdx], STATE.linePoints[lastIdx + 1], STATE.linePoints[lastIdx + 2]);
+                
+                if (pt.distanceTo(lastPt) > 0.015) {
+                    STATE.linePoints.push(pt.x, pt.y, pt.z);
+                    STATE.currentLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
+                    STATE.currentLine.geometry.setDrawRange(0, STATE.linePoints.length / 3);
+                }
             }
         }
     } else {
@@ -1057,7 +1032,7 @@ function animate() {
 }
 
 /**
- * SECTION 8: UI EVENT HANDLERS & MODAL CONTROLS
+ * SECTION 8: UI EVENT HANDLERS
  */
 function setupUIHandlers() {
     initAudio();
@@ -1081,6 +1056,30 @@ function setupUIHandlers() {
         guideModal.classList.add('hidden');
     };
 
+    // Color Picker Buttons
+    document.querySelectorAll('.color-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+            const target = e.currentTarget;
+            target.classList.add('active');
+            STATE.brushColor = target.dataset.color;
+            if (STATE.selectedObj && STATE.selectedObj.material) {
+                const colHex = parseInt(STATE.brushColor.replace('#', '0x'));
+                if (STATE.selectedObj.material.color) STATE.selectedObj.material.color.setHex(colHex);
+                if (STATE.selectedObj.material.emissive) STATE.selectedObj.material.emissive.setHex(colHex);
+            }
+            playSound('pinch');
+        });
+    });
+
+    // Brush Size Slider
+    brushSizeSlider.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        STATE.brushSize = val;
+        brushSizeVal.innerText = `${val.toFixed(2)}u`;
+    });
+
+    // Mode & Shape Selection
     document.querySelectorAll('.tool-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1091,6 +1090,7 @@ function setupUIHandlers() {
         });
     });
 
+    // Material Selection
     document.querySelectorAll('.mat-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
@@ -1099,7 +1099,7 @@ function setupUIHandlers() {
             STATE.selectedMaterial = target.dataset.mat;
 
             if (STATE.selectedObj && STATE.selectedObj.type === 'Mesh') {
-                STATE.selectedObj.material = createMaterial(STATE.selectedMaterial);
+                STATE.selectedObj.material = createMaterial(STATE.selectedMaterial, STATE.brushColor);
             }
             playSound('pinch');
         });

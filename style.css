@@ -130,7 +130,7 @@ body {
 
 /* POSITIONS */
 .top-left { top: 20px; left: 20px; width: 260px; }
-.top-right { top: 20px; right: 20px; width: 310px; max-height: calc(100vh - 100px); overflow-y: auto; }
+.top-right { top: 20px; right: 20px; width: 315px; max-height: calc(100vh - 100px); overflow-y: auto; }
 .bottom-left { bottom: 20px; left: 20px; display: flex; flex-wrap: wrap; gap: 8px; max-width: 480px; }
 .bottom-right { bottom: 20px; right: 20px; width: 260px; }
 
@@ -255,16 +255,42 @@ h3 {
     box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
 }
 
-.btn-action.primary-glow {
-    background: rgba(0, 255, 136, 0.12);
-    border-color: rgba(0, 255, 136, 0.3);
-    color: var(--primary);
-    width: 100%;
-    justify-content: center;
+/* 3D AR BRUSH CONTROLS */
+.brush-controls {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 10px;
+    border-radius: 10px;
 }
-.btn-action.primary-glow:hover, .btn-action.primary-glow.hand-hover {
-    background: rgba(0, 255, 136, 0.25);
-    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+
+.color-picker-row {
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+}
+
+.color-btn {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.color-btn:hover, .color-btn.hand-hover {
+    transform: scale(1.18);
+    border-color: #ffffff;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+}
+
+.color-btn.active {
+    transform: scale(1.2);
+    border-color: #ffffff;
+    box-shadow: 0 0 14px currentColor;
+}
+
+.margin-top {
+    margin-top: 8px;
 }
 
 /* TRANSFORM CONTROLS */
@@ -280,7 +306,6 @@ h3 {
     gap: 8px;
     font-size: 0.75rem;
     color: #a0aec0;
-    margin-bottom: 8px;
 }
 .slider-row input[type="range"] {
     flex: 1;
@@ -291,13 +316,14 @@ h3 {
     font-family: var(--font-mono);
     color: var(--primary);
     font-weight: bold;
-    min-width: 35px;
+    min-width: 38px;
 }
 
 .transform-btn-row {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 5px;
+    margin-top: 8px;
 }
 .sm-btn {
     padding: 6px 8px;
@@ -325,6 +351,18 @@ h3 {
 .btn-action.danger:hover, .btn-action.danger.hand-hover {
     background: rgba(255, 51, 102, 0.25);
     border-color: var(--danger);
+}
+
+.btn-action.primary-glow {
+    background: rgba(0, 255, 136, 0.12);
+    border-color: rgba(0, 255, 136, 0.3);
+    color: var(--primary);
+    width: 100%;
+    justify-content: center;
+}
+.btn-action.primary-glow:hover, .btn-action.primary-glow.hand-hover {
+    background: rgba(0, 255, 136, 0.25);
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
 }
 
 /* CONTROLS GUIDE */
