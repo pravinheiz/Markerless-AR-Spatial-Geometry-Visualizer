@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Spatial Geometry Visualizer</title>
     
-    <!-- Three.js -->
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Three.js Module Map -->
     <script type="importmap">
         {
             "imports": {
@@ -15,7 +20,7 @@
         }
     </script>
 
-    <!-- Legacy MediaPipe Hands (Robust, no WASM fetch issues) -->
+    <!-- Legacy MediaPipe Hands API (Robust & CDN stable) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -25,52 +30,112 @@
 </head>
 <body>
 
-    <!-- LAYER 0: Real Webcam Feed (Background) -->
+    <!-- LAYER 0: Real Webcam Feed -->
     <video id="webcam-input" autoplay playsinline muted></video>
 
-    <!-- LAYER 1: Three.js 3D Scene (Transparent Middle) -->
+    <!-- LAYER 1: Three.js 3D Spatial Geometry Scene -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- LAYER 2: Hand Skeleton Overlay (Front) -->
+    <!-- LAYER 2: Hand Skeleton & HUD Canvas -->
     <canvas id="hand-canvas"></canvas>
 
-    <!-- UI Overlay -->
+    <!-- UI LAYER -->
     <div id="ui-layer">
-        <div class="panel top-left">
-            <h1>Spatial Geometry AR</h1>
-            <div id="gesture-display" class="status">INITIALIZING...</div>
-            <div id="mode-display" class="sub-status">Mode: IDLE</div>
+        
+        <!-- TOP LEFT: Status & Tracking Header -->
+        <div class="panel top-left glow-card">
+            <div class="brand">
+                <div class="brand-icon"></div>
+                <h1>SPATIAL GEOMETRY AR</h1>
+            </div>
+            <div class="status-box">
+                <div id="gesture-display" class="status">INITIALIZING...</div>
+                <div id="mode-display" class="sub-status">MODE: IDLE</div>
+            </div>
+            <div class="tracking-meter">
+                <div class="track-info">
+                    <span>TRACKING CONFIDENCE</span>
+                    <span id="track-val">0%</span>
+                </div>
+                <div class="bar"><div id="track-bar"></div></div>
+            </div>
         </div>
 
-        <div class="panel top-right">
-            <h3>Controls</h3>
-            <ul>
-                <li><span class="key">Pinch</span> Free Draw 3D Path</li>
-                <li><span class="key">Grab</span> Rotate (X/Y) & Move</li>
-                <li><span class="key">2-Hand Spread</span> Zoom Camera</li>
-                <li><span class="key">2-Hand Vertical</span> Extrude Shape</li>
-            </ul>
+        <!-- TOP RIGHT: Spatial Primitives & Material Toolbar -->
+        <div class="panel top-right glow-card">
+            <h3>SPATIAL TOOLKIT</h3>
+            <div class="tool-group">
+                <div class="tool-label">SHAPES</div>
+                <div class="grid-buttons">
+                    <button class="tool-btn active" data-shape="DRAW" title="Pinch to draw 3D curve">✏️ Draw</button>
+                    <button class="tool-btn" data-shape="CUBE" title="Spawn 3D Cube">🧊 Cube</button>
+                    <button class="tool-btn" data-shape="SPHERE" title="Spawn 3D Sphere">🔮 Sphere</button>
+                    <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
+                    <button class="tool-btn" data-shape="CONE" title="Spawn Cone">📐 Cone</button>
+                    <button class="tool-btn" data-shape="TORUS" title="Spawn Torus Ring">⭕ Torus</button>
+                    <button class="tool-btn" data-shape="PYRAMID" title="Spawn Pyramid">🔺 Pyramid</button>
+                </div>
+            </div>
+
+            <div class="tool-group">
+                <div class="tool-label">MATERIAL SHADER</div>
+                <div class="grid-buttons materials">
+                    <button class="mat-btn active" data-mat="HOLOGRAM">Hologram</button>
+                    <button class="mat-btn" data-mat="GLASS">Glass</button>
+                    <button class="mat-btn" data-mat="METAL">Metal</button>
+                    <button class="mat-btn" data-mat="NEON">Neon</button>
+                </div>
+            </div>
+
+            <div class="controls-guide">
+                <div class="guide-title">GESTURE CONTROLS</div>
+                <ul>
+                    <li><span class="key">Pinch</span> Draw 3D Line / Create Shape</li>
+                    <li><span class="key">Grab</span> Move & Rotate Object</li>
+                    <li><span class="key">2-Hand Spread</span> Zoom / AR Measurement</li>
+                    <li><span class="key">2-Hand Vertical</span> Extrude Drawn Line</li>
+                </ul>
+            </div>
         </div>
 
-        <div class="panel bottom-left">
-            <button id="btn-reset">Reset Scene</button>
-            <button id="btn-skeleton">Toggle Skeleton</button>
+        <!-- BOTTOM LEFT: Scene Controls -->
+        <div class="panel bottom-left glow-card">
+            <button id="btn-extrude" class="btn-action" title="Extrude last drawn line into 3D volume">✨ Extrude Line</button>
+            <button id="btn-reset" class="btn-action danger" title="Clear all objects">🗑️ Clear Scene</button>
+            <button id="btn-skeleton" class="btn-action">🖐️ Skeleton: ON</button>
+            <button id="btn-sfx" class="btn-action">🔊 SFX: ON</button>
         </div>
 
-        <div class="panel bottom-right">
-            <div>FPS: <span id="fps-val">0</span></div>
-            <div>Tracking: <span id="track-val">0%</span></div>
-            <div class="bar"><div id="track-bar"></div></div>
+        <!-- BOTTOM RIGHT: Spatial Geometry HUD & FPS -->
+        <div class="panel bottom-right glow-card">
+            <div class="hud-header">SPATIAL METRICS</div>
+            <div id="metrics-card" class="metrics-card">
+                <div class="metric-row"><span class="lbl">Object:</span> <span id="m-name" class="val">None</span></div>
+                <div class="metric-row"><span class="lbl">Volume:</span> <span id="m-vol" class="val">0.00 u³</span></div>
+                <div class="metric-row"><span class="lbl">Surface Area:</span> <span id="m-area" class="val">0.00 u²</span></div>
+                <div class="metric-row"><span class="lbl">Bounding Box:</span> <span id="m-bounds" class="val">0 × 0 × 0</span></div>
+                <div class="metric-row"><span class="lbl">Vertices / Edges:</span> <span id="m-verts" class="val">0 / 0</span></div>
+            </div>
+            <div class="fps-counter">FPS: <span id="fps-val">60</span></div>
+        </div>
+
+        <!-- DYNAMIC OVERLAYS -->
+        <div id="ruler-display" class="ruler-pill hidden">
+            <span>DIST: </span><strong id="ruler-val">0.00 m</strong>
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">PINCH TO DRAW</div>
+        <div id="prompt" class="hidden">PINCH TO DRAW IN 3D SPACE</div>
     </div>
 
+    <!-- INITIALIZATION LOADING OVERLAY -->
     <div id="loading">
-        <div class="spinner"></div>
-        <h2>Initializing Vision System...</h2>
-        <p>Please allow camera access.</p>
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <h2>Initializing AR Vision & Spatial System</h2>
+            <p>Requesting camera access for gesture tracking...</p>
+            <div class="fallback-note">Desktop / Mouse testing supported automatically if camera is disabled.</div>
+        </div>
     </div>
 
     <script type="module" src="main.js"></script>
