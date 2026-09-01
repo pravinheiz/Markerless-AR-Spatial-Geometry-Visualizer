@@ -77,7 +77,7 @@
                 <div class="tool-group">
                     <div class="tool-label">SPAWN / DRAW SHAPE</div>
                     <div class="grid-buttons">
-                        <button class="tool-btn active" data-shape="DRAW" title="Freehand 3D Draw">✏️ Draw</button>
+                        <button class="tool-btn active" data-shape="DRAW" title="Freehand 3D Draw (Auto-completes shapes)">✏️ Draw</button>
                         <button class="tool-btn" data-shape="CUBE" title="Spawn Cube">🧊 Cube</button>
                         <button class="tool-btn" data-shape="SPHERE" title="Spawn Sphere">🔮 Sphere</button>
                         <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
@@ -98,12 +98,12 @@
                     </div>
                 </div>
 
-                <!-- TRANSFORM CONTROLS FOR SELECTED OBJECT -->
+                <!-- TRANSFORM CONTROLS -->
                 <div class="tool-group transform-controls">
                     <div class="tool-label">OBJECT TRANSFORM</div>
                     <div class="slider-row">
                         <span>Scale:</span>
-                        <input type="range" id="scale-slider" min="0.2" max="3.0" step="0.1" value="1.0">
+                        <input type="range" id="scale-slider" min="0.2" max="4.0" step="0.1" value="1.0">
                         <span id="scale-val" class="slider-val">1.0×</span>
                     </div>
                     <div class="transform-btn-row">
@@ -114,15 +114,9 @@
                     </div>
                 </div>
 
-                <!-- CONTROLS GUIDE -->
+                <!-- QUICK CONTROLS -->
                 <div class="controls-guide">
-                    <div class="guide-title">INTERACTION MODES</div>
-                    <ul>
-                        <li><span class="key">Mouse Click & Drag</span> Move selected object</li>
-                        <li><span class="key">Mouse Wheel</span> Scale selected object</li>
-                        <li><span class="key">Right Click Drag</span> Orbit camera</li>
-                        <li><span class="key">Hand Pinch / Grab</span> Draw / Move shape</li>
-                    </ul>
+                    <button id="btn-guide-toggle" class="btn-action primary-glow" title="View Hand Gesture Guide">❓ Gesture Guide</button>
                 </div>
             </div>
         </div>
@@ -135,7 +129,7 @@
             <button id="btn-sfx" class="btn-action">🔊 SFX: ON</button>
         </div>
 
-        <!-- BOTTOM RIGHT: Optimized Spatial Metrics HUD Card -->
+        <!-- BOTTOM RIGHT: Spatial Metrics HUD Card -->
         <div class="panel bottom-right glow-card" id="panel-metrics">
             <div class="panel-header">
                 <div class="hud-header">SPATIAL METRICS</div>
@@ -155,11 +149,66 @@
 
         <!-- DYNAMIC OVERLAYS -->
         <div id="ruler-display" class="ruler-pill hidden">
-            <span>DIST: </span><strong id="ruler-val">0.00 m</strong>
+            <span>IRON MAN ZOOM / DIST: </span><strong id="ruler-val">1.00×</strong>
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">PINCH OR CLICK TO DRAW / SPAWN</div>
+        <div id="prompt" class="hidden">PINCH TO DRAW / SPAWN</div>
+
+        <!-- INTERACTIVE GESTURE HELP GUIDE MODAL -->
+        <div id="gesture-guide-modal" class="modal-card hidden glow-card">
+            <div class="modal-header">
+                <h2>🖐️ IRON MAN GESTURE HELP GUIDE</h2>
+                <button id="btn-close-guide" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="gesture-grid">
+                    <div class="gesture-card">
+                        <div class="g-icon">🤏</div>
+                        <div class="g-info">
+                            <strong>Single Pinch</strong>
+                            <p>Draw 3D curve (Auto-completes shapes), spawn selected primitive, or click UI buttons.</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
+                        <div class="g-icon">✊</div>
+                        <div class="g-info">
+                            <strong>Fist / Grab</strong>
+                            <p>6-DOF Iron Man translation & 3D wrist tilt rotation (Pitch, Yaw, Roll).</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
+                        <div class="g-icon">🤏🤏</div>
+                        <div class="g-info">
+                            <strong>Dual Pinch Zoom</strong>
+                            <p>Iron Man Zoom In / Zoom Out & 3D hologram scaling by spreading or closing pinched hands.</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
+                        <div class="g-icon">↕️</div>
+                        <div class="g-info">
+                            <strong>Dual Vertical Motion</strong>
+                            <p>Extrude drawn 2D curves into 3D volumetric tubes.</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
+                        <div class="g-icon">📏</div>
+                        <div class="g-info">
+                            <strong>2-Hand Spread</strong>
+                            <p>AR Spatial Measurement Ruler (measures real-time distance in meters).</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
+                        <div class="g-icon">🖐️</div>
+                        <div class="g-info">
+                            <strong>Open Palm Pointer</strong>
+                            <p>Oculus Quest holographic index fingertip pointer for hovering and selecting.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <!-- INITIALIZATION LOADING OVERLAY -->

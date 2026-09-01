@@ -255,6 +255,18 @@ h3 {
     box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
 }
 
+.btn-action.primary-glow {
+    background: rgba(0, 255, 136, 0.12);
+    border-color: rgba(0, 255, 136, 0.3);
+    color: var(--primary);
+    width: 100%;
+    justify-content: center;
+}
+.btn-action.primary-glow:hover, .btn-action.primary-glow.hand-hover {
+    background: rgba(0, 255, 136, 0.25);
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+}
+
 /* TRANSFORM CONTROLS */
 .transform-controls {
     background: rgba(0, 0, 0, 0.25);
@@ -321,29 +333,6 @@ h3 {
     padding-top: 8px;
     border-top: 1px solid rgba(255,255,255,0.06);
 }
-.guide-title {
-    font-size: 0.68rem;
-    font-weight: 700;
-    color: #6b7c93;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-}
-ul {
-    list-style: none;
-    font-size: 0.72rem;
-    color: #a0aec0;
-    line-height: 1.6;
-}
-.key {
-    background: rgba(255,255,255,0.1);
-    padding: 1px 5px;
-    border-radius: 4px;
-    color: var(--primary);
-    font-weight: 600;
-    font-family: var(--font-mono);
-    border: 1px solid rgba(0, 255, 136, 0.2);
-    font-size: 0.68rem;
-}
 
 /* SPATIAL METRICS CARD */
 .hud-header {
@@ -376,23 +365,77 @@ ul {
 }
 #fps-val { color: var(--primary); font-weight: 700; }
 
-/* OCULUS QUEST & TONY STARK HAND POINTER CURSOR */
-.hand-pointer-ring {
-    position: absolute;
-    width: 24px; height: 24px;
-    border: 2px solid var(--accent);
-    border-radius: 50%;
+/* MODAL CARD: GESTURE HELP GUIDE */
+.modal-card {
+    position: fixed;
+    top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    pointer-events: none;
-    box-shadow: 0 0 12px var(--accent);
-    transition: width 0.15s, height 0.15s, border-color 0.15s;
-    z-index: 50;
+    width: 90%;
+    max-width: 520px;
+    background: rgba(10, 16, 26, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--accent);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+    z-index: 100;
+    pointer-events: auto;
 }
-.hand-pointer-ring.pinching {
-    width: 14px; height: 14px;
-    border-color: var(--primary);
-    background: rgba(0, 255, 136, 0.4);
-    box-shadow: 0 0 18px var(--primary);
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.modal-header h2 {
+    font-size: 1rem;
+    color: var(--accent);
+    letter-spacing: 1px;
+}
+.btn-close {
+    background: transparent;
+    border: none;
+    color: #a0aec0;
+    font-size: 1.4rem;
+    cursor: pointer;
+    line-height: 1;
+}
+.btn-close:hover { color: #ffffff; }
+
+.gesture-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+.gesture-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+.g-icon {
+    font-size: 1.4rem;
+    background: rgba(0, 204, 255, 0.1);
+    padding: 6px;
+    border-radius: 8px;
+    line-height: 1;
+}
+.g-info strong {
+    font-size: 0.8rem;
+    color: var(--primary);
+    display: block;
+    margin-bottom: 2px;
+}
+.g-info p {
+    font-size: 0.7rem;
+    color: #a0aec0;
+    line-height: 1.4;
 }
 
 /* OVERLAYS & PILLS */
