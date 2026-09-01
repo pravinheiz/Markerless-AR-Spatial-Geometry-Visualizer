@@ -20,7 +20,7 @@
         }
     </script>
 
-    <!-- Legacy MediaPipe Hands API (Robust & CDN stable) -->
+    <!-- Legacy MediaPipe Hands API -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -30,75 +30,104 @@
 </head>
 <body>
 
-    <!-- LAYER 0: Real Webcam Feed -->
+    <!-- LAYER 0: Webcam Feed -->
     <video id="webcam-input" autoplay playsinline muted></video>
 
-    <!-- LAYER 1: Three.js 3D Spatial Geometry Scene -->
+    <!-- LAYER 1: Three.js 3D Canvas -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- LAYER 2: Hand Skeleton & HUD Canvas -->
+    <!-- LAYER 2: Hand Skeleton Canvas -->
     <canvas id="hand-canvas"></canvas>
 
     <!-- UI LAYER -->
     <div id="ui-layer">
         
-        <!-- TOP LEFT: Status & Tracking Header -->
-        <div class="panel top-left glow-card">
-            <div class="brand">
-                <div class="brand-icon"></div>
-                <h1>SPATIAL GEOMETRY AR</h1>
-            </div>
-            <div class="status-box">
-                <div id="gesture-display" class="status">INITIALIZING...</div>
-                <div id="mode-display" class="sub-status">MODE: IDLE</div>
-            </div>
-            <div class="tracking-meter">
-                <div class="track-info">
-                    <span>TRACKING CONFIDENCE</span>
-                    <span id="track-val">0%</span>
+        <!-- TOP LEFT: Status Header -->
+        <div class="panel top-left glow-card" id="panel-status">
+            <div class="panel-header">
+                <div class="brand">
+                    <div class="brand-icon"></div>
+                    <h1>SPATIAL GEOMETRY AR</h1>
                 </div>
-                <div class="bar"><div id="track-bar"></div></div>
+                <button class="btn-toggle-panel" data-target="panel-status" title="Collapse panel">−</button>
+            </div>
+            <div class="panel-body">
+                <div class="status-box">
+                    <div id="gesture-display" class="status">INITIALIZING...</div>
+                    <div id="mode-display" class="sub-status">MODE: IDLE</div>
+                </div>
+                <div class="tracking-meter">
+                    <div class="track-info">
+                        <span>TRACKING CONFIDENCE</span>
+                        <span id="track-val">0%</span>
+                    </div>
+                    <div class="bar"><div id="track-bar"></div></div>
+                </div>
             </div>
         </div>
 
-        <!-- TOP RIGHT: Spatial Primitives & Material Toolbar -->
-        <div class="panel top-right glow-card">
-            <h3>SPATIAL TOOLKIT</h3>
-            <div class="tool-group">
-                <div class="tool-label">SHAPES</div>
-                <div class="grid-buttons">
-                    <button class="tool-btn active" data-shape="DRAW" title="Pinch to draw 3D curve">✏️ Draw</button>
-                    <button class="tool-btn" data-shape="CUBE" title="Spawn 3D Cube">🧊 Cube</button>
-                    <button class="tool-btn" data-shape="SPHERE" title="Spawn 3D Sphere">🔮 Sphere</button>
-                    <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
-                    <button class="tool-btn" data-shape="CONE" title="Spawn Cone">📐 Cone</button>
-                    <button class="tool-btn" data-shape="TORUS" title="Spawn Torus Ring">⭕ Torus</button>
-                    <button class="tool-btn" data-shape="PYRAMID" title="Spawn Pyramid">🔺 Pyramid</button>
-                </div>
+        <!-- TOP RIGHT: Optimized Spatial Toolkit Panel -->
+        <div class="panel top-right glow-card" id="panel-toolkit">
+            <div class="panel-header">
+                <h3>SPATIAL TOOLKIT</h3>
+                <button class="btn-toggle-panel" data-target="panel-toolkit" title="Collapse panel">−</button>
             </div>
-
-            <div class="tool-group">
-                <div class="tool-label">MATERIAL SHADER</div>
-                <div class="grid-buttons materials">
-                    <button class="mat-btn active" data-mat="HOLOGRAM">Hologram</button>
-                    <button class="mat-btn" data-mat="GLASS">Glass</button>
-                    <button class="mat-btn" data-mat="METAL">Metal</button>
-                    <button class="mat-btn" data-mat="NEON">Neon</button>
+            <div class="panel-body">
+                <!-- SHAPES PRIMITIVES TOOLBAR -->
+                <div class="tool-group">
+                    <div class="tool-label">SPAWN / DRAW SHAPE</div>
+                    <div class="grid-buttons">
+                        <button class="tool-btn active" data-shape="DRAW" title="Freehand 3D Draw">✏️ Draw</button>
+                        <button class="tool-btn" data-shape="CUBE" title="Spawn Cube">🧊 Cube</button>
+                        <button class="tool-btn" data-shape="SPHERE" title="Spawn Sphere">🔮 Sphere</button>
+                        <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
+                        <button class="tool-btn" data-shape="CONE" title="Spawn Cone">📐 Cone</button>
+                        <button class="tool-btn" data-shape="TORUS" title="Spawn Torus Ring">⭕ Torus</button>
+                        <button class="tool-btn" data-shape="PYRAMID" title="Spawn Pyramid">🔺 Pyramid</button>
+                    </div>
                 </div>
-            </div>
 
-            <div class="controls-guide">
-                <div class="guide-title">GESTURE CONTROLS</div>
-                <ul>
-                    <li><span class="key">Pinch</span> Draw 3D Line / Create Shape</li>
-                    <li><span class="key">Grab</span> Move & Rotate Object</li>
-                    <li><span class="key">2-Hand Spread</span> Zoom / AR Measurement</li>
-                    <li><span class="key">2-Hand Vertical</span> Extrude Drawn Line</li>
-                </ul>
+                <!-- MATERIAL SHADERS -->
+                <div class="tool-group">
+                    <div class="tool-label">MATERIAL SHADER</div>
+                    <div class="grid-buttons materials">
+                        <button class="mat-btn active" data-mat="HOLOGRAM">Hologram</button>
+                        <button class="mat-btn" data-mat="GLASS">Glass</button>
+                        <button class="mat-btn" data-mat="METAL">Metal</button>
+                        <button class="mat-btn" data-mat="NEON">Neon</button>
+                    </div>
+                </div>
+
+                <!-- TRANSFORM CONTROLS FOR SELECTED OBJECT -->
+                <div class="tool-group transform-controls">
+                    <div class="tool-label">OBJECT TRANSFORM</div>
+                    <div class="slider-row">
+                        <span>Scale:</span>
+                        <input type="range" id="scale-slider" min="0.2" max="3.0" step="0.1" value="1.0">
+                        <span id="scale-val" class="slider-val">1.0×</span>
+                    </div>
+                    <div class="transform-btn-row">
+                        <button id="btn-rot-x" class="sm-btn" title="Rotate X 45°">↻ Rot X</button>
+                        <button id="btn-rot-y" class="sm-btn" title="Rotate Y 45°">↻ Rot Y</button>
+                        <button id="btn-rot-z" class="sm-btn" title="Rotate Z 45°">↻ Rot Z</button>
+                        <button id="btn-delete" class="sm-btn danger" title="Delete selected object">🗑️ Delete</button>
+                    </div>
+                </div>
+
+                <!-- CONTROLS GUIDE -->
+                <div class="controls-guide">
+                    <div class="guide-title">INTERACTION MODES</div>
+                    <ul>
+                        <li><span class="key">Mouse Click & Drag</span> Move selected object</li>
+                        <li><span class="key">Mouse Wheel</span> Scale selected object</li>
+                        <li><span class="key">Right Click Drag</span> Orbit camera</li>
+                        <li><span class="key">Hand Pinch / Grab</span> Draw / Move shape</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
-        <!-- BOTTOM LEFT: Scene Controls -->
+        <!-- BOTTOM LEFT: Scene Action Buttons -->
         <div class="panel bottom-left glow-card">
             <button id="btn-extrude" class="btn-action" title="Extrude last drawn line into 3D volume">✨ Extrude Line</button>
             <button id="btn-reset" class="btn-action danger" title="Clear all objects">🗑️ Clear Scene</button>
@@ -106,17 +135,22 @@
             <button id="btn-sfx" class="btn-action">🔊 SFX: ON</button>
         </div>
 
-        <!-- BOTTOM RIGHT: Spatial Geometry HUD & FPS -->
-        <div class="panel bottom-right glow-card">
-            <div class="hud-header">SPATIAL METRICS</div>
-            <div id="metrics-card" class="metrics-card">
-                <div class="metric-row"><span class="lbl">Object:</span> <span id="m-name" class="val">None</span></div>
-                <div class="metric-row"><span class="lbl">Volume:</span> <span id="m-vol" class="val">0.00 u³</span></div>
-                <div class="metric-row"><span class="lbl">Surface Area:</span> <span id="m-area" class="val">0.00 u²</span></div>
-                <div class="metric-row"><span class="lbl">Bounding Box:</span> <span id="m-bounds" class="val">0 × 0 × 0</span></div>
-                <div class="metric-row"><span class="lbl">Vertices / Edges:</span> <span id="m-verts" class="val">0 / 0</span></div>
+        <!-- BOTTOM RIGHT: Optimized Spatial Metrics HUD Card -->
+        <div class="panel bottom-right glow-card" id="panel-metrics">
+            <div class="panel-header">
+                <div class="hud-header">SPATIAL METRICS</div>
+                <button class="btn-toggle-panel" data-target="panel-metrics" title="Collapse panel">−</button>
             </div>
-            <div class="fps-counter">FPS: <span id="fps-val">60</span></div>
+            <div class="panel-body">
+                <div id="metrics-card" class="metrics-card">
+                    <div class="metric-row"><span class="lbl">Object:</span> <span id="m-name" class="val">None</span></div>
+                    <div class="metric-row"><span class="lbl">Volume:</span> <span id="m-vol" class="val">0.00 u³</span></div>
+                    <div class="metric-row"><span class="lbl">Surface Area:</span> <span id="m-area" class="val">0.00 u²</span></div>
+                    <div class="metric-row"><span class="lbl">Bounding Box:</span> <span id="m-bounds" class="val">0 × 0 × 0</span></div>
+                    <div class="metric-row"><span class="lbl">Vertices / Edges:</span> <span id="m-verts" class="val">0 / 0</span></div>
+                </div>
+                <div class="fps-counter">FPS: <span id="fps-val">60</span></div>
+            </div>
         </div>
 
         <!-- DYNAMIC OVERLAYS -->
@@ -125,7 +159,7 @@
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">PINCH TO DRAW IN 3D SPACE</div>
+        <div id="prompt" class="hidden">PINCH OR CLICK TO DRAW / SPAWN</div>
     </div>
 
     <!-- INITIALIZATION LOADING OVERLAY -->

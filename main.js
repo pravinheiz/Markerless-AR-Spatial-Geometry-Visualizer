@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /**
  * CONFIGURATION & CONSTANTS
@@ -31,12 +31,14 @@ const STATE = {
     landmarks: [], // Smoothed 3D landmarks
     objects: [],
     selectedObj: null,
+    selectionBox: null,
     currentLine: null,
     linePoints: [],
     showSkeleton: true,
     enableSFX: true,
     isPinching: false,
-    cameraDepth: 3.5
+    cameraDepth: 3.5,
+    isDraggingObj: false
 };
 
 // DOM ELEMENTS
@@ -62,8 +64,12 @@ const mArea = document.getElementById('m-area');
 const mBounds = document.getElementById('m-bounds');
 const mVerts = document.getElementById('m-verts');
 
+// TRANSFORM SLIDER & BUTTONS
+const scaleSlider = document.getElementById('scale-slider');
+const scaleVal = document.getElementById('scale-val');
+
 // THREE.JS GLOBALS
-let scene, camera, renderer, raycaster, spatialPlane, laserLine;
+let scene, camera, renderer, raycaster, spatialPlane, laserLine, orbitControls;
 let clock = new THREE.Clock();
 let audioCtx = null;
 
@@ -181,12 +187,10 @@ function initMediaPipe() {
             console.warn("Camera access failed or unavailable. Falling back to Mouse mode.", err);
             loading.style.opacity = '0';
             setTimeout(() => loading.style.display = 'none', 500);
-            enableMouseFallback();
         });
 }
 
 function onHandsResults(results) {
-    // Resize 2D hand skeleton canvas to match window
     if (handCanvas.width !== window.innerWidth || handCanvas.height !== window.innerHeight) {
         handCanvas.width = window.innerWidth;
         handCanvas.height = window.innerHeight;
@@ -203,12 +207,12 @@ function onHandsResults(results) {
         if (STATE.mode === 'GRABBED') unselectObject();
         if (laserLine) laserLine.visible = false;
         rulerDisplay.classList.add('hidden');
-        STATE.mode = 'IDLE';
+        if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         updateUI(0);
         return;
     }
 
-    // PHASE 1: Collect & Smooth Landmarks for all detected hands
+    // PHASE 1: Collect & Smooth Landmarks
     STATE.hands.forEach((lmList, idx) => {
         if (!prevLandmarks[idx]) prevLandmarks[idx] = [];
         const smoothed = lmList.map((lm, i) => {
@@ -216,12 +220,12 @@ function onHandsResults(results) {
             return prevLandmarks[idx][i];
         });
         STATE.landmarks.push(smoothed);
-        totalConf += 0.9; // Base confidence estimation
+        totalConf += 0.9;
 
         if (STATE.showSkeleton) drawSkeleton(smoothed, idx);
     });
 
-    // PHASE 2: Single-Hand Gesture Analysis (Primary Hand = Index 0)
+    // PHASE 2: Primary Hand Gesture Analysis
     const primaryLm = STATE.landmarks[0];
     const thumb = primaryLm[4];
     const index = primaryLm[8];
@@ -231,7 +235,7 @@ function onHandsResults(results) {
     const wrist = primaryLm[0];
 
     const pinchDist = getDistance(thumb, index);
-    const handScale = getDistance(wrist, primaryLm[9]) || 0.2; // Wrist to MCP middle
+    const handScale = getDistance(wrist, primaryLm[9]) || 0.2;
     const isGrabbed = (
         getDistance(index, wrist) / handScale < 1.3 &&
         getDistance(middle, wrist) / handScale < 1.3 &&
@@ -239,7 +243,6 @@ function onHandsResults(results) {
         getDistance(pinky, wrist) / handScale < 1.3
     );
 
-    // Hysteresis threshold check for Pinch
     if (!STATE.isPinching && pinchDist < CFG.PINCH_ENTER) {
         STATE.isPinching = true;
         playSound('pinch');
@@ -247,11 +250,11 @@ function onHandsResults(results) {
         STATE.isPinching = false;
     }
 
-    // PHASE 3: Multi-Hand Spatial Measurement Check
+    // PHASE 3: Two-Hand Measurement Check
     let isTwoHand = false;
     if (STATE.landmarks.length === 2) {
-        const h1 = STATE.landmarks[0][8]; // Index tip hand 1
-        const h2 = STATE.landmarks[1][8]; // Index tip hand 2
+        const h1 = STATE.landmarks[0][8];
+        const h2 = STATE.landmarks[1][8];
         
         if (h1 && h2) {
             const pt1 = getSpatialPoint(h1);
@@ -261,14 +264,10 @@ function onHandsResults(results) {
                 isTwoHand = true;
                 const distMeters = pt1.distanceTo(pt2);
                 
-                // Update AR Ruler Overlay
                 rulerDisplay.classList.remove('hidden');
                 rulerVal.innerText = `${distMeters.toFixed(2)} m`;
-                
-                // Render 3D Laser Measurement Line
                 updateLaserLine(pt1, pt2);
 
-                // Two Hand Vertical Extrude Trigger
                 const vertDiff = Math.abs(h1.y - h2.y);
                 if (vertDiff > 0.25 && STATE.gesture === 'PINCH') {
                     STATE.mode = 'EXTRUDING';
@@ -284,7 +283,7 @@ function onHandsResults(results) {
         rulerDisplay.classList.add('hidden');
     }
 
-    // PHASE 4: Primary Gesture State Machine Logic
+    // PHASE 4: Primary Gesture State Machine
     if (!isTwoHand) {
         if (STATE.isPinching) {
             STATE.gesture = 'PINCH';
@@ -293,9 +292,8 @@ function onHandsResults(results) {
                     STATE.mode = 'DRAWING';
                 }
             } else {
-                // Instantly spawn shape primitive at pinch location
                 spawnShapePrimitive(STATE.selectedShape, index);
-                STATE.isPinching = false; // Reset to prevent continuous spawning
+                STATE.isPinching = false;
             }
         } else if (isGrabbed) {
             STATE.gesture = 'GRAB';
@@ -310,7 +308,7 @@ function onHandsResults(results) {
             STATE.gesture = 'OPEN';
             if (STATE.mode === 'DRAWING') finalizeDrawing();
             if (STATE.mode === 'GRABBED') unselectObject();
-            STATE.mode = 'IDLE';
+            if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         }
     }
 
@@ -324,12 +322,12 @@ function drawSkeleton(lm, handIdx) {
     handCtx.beginPath();
 
     const connections = [
-        [0, 1], [1, 2], [2, 3], [3, 4], // Thumb
-        [0, 5], [5, 6], [6, 7], [7, 8], // Index
-        [0, 9], [9, 10], [10, 11], [11, 12], // Middle
-        [0, 13], [13, 14], [14, 15], [15, 16], // Ring
-        [0, 17], [17, 18], [18, 19], [19, 20], // Pinky
-        [5, 9], [9, 13], [13, 17] // Palm Cross
+        [0, 1], [1, 2], [2, 3], [3, 4],
+        [0, 5], [5, 6], [6, 7], [7, 8],
+        [0, 9], [9, 10], [10, 11], [11, 12],
+        [0, 13], [13, 14], [14, 15], [15, 16],
+        [0, 17], [17, 18], [18, 19], [19, 20],
+        [5, 9], [9, 13], [13, 17]
     ];
 
     connections.forEach(([i, j]) => {
@@ -340,7 +338,6 @@ function drawSkeleton(lm, handIdx) {
     });
     handCtx.stroke();
 
-    // Draw Joint Nodes with AR Glow
     lm.forEach((p, i) => {
         const isTip = (i === 4 || i === 8 || i === 12 || i === 16 || i === 20);
         handCtx.beginPath();
@@ -356,7 +353,7 @@ function drawSkeleton(lm, handIdx) {
 }
 
 /**
- * SECTION 3: THREE.JS SETUP & MATERIALS
+ * SECTION 3: THREE.JS SETUP & ORBIT CONTROLS
  */
 function initThree() {
     scene = new THREE.Scene();
@@ -368,9 +365,16 @@ function initThree() {
     renderer = new THREE.WebGLRenderer({ canvas: webglCanvas, alpha: true, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0); // Transparent for webcam layer
+    renderer.setClearColor(0x000000, 0);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Orbit Controls for smooth mouse navigation
+    orbitControls = new OrbitControls(camera, renderer.domElement);
+    orbitControls.enableDamping = true;
+    orbitControls.dampingFactor = 0.05;
+    orbitControls.screenSpacePanning = true;
+    orbitControls.maxPolarAngle = Math.PI / 2 + 0.1;
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -387,12 +391,12 @@ function initThree() {
     pointLight.position.set(-3, 3, 2);
     scene.add(pointLight);
 
-    // Spatial Reference Grid
+    // Grid
     const grid = new THREE.GridHelper(12, 12, 0x00ff88, 0x1f2d3d);
     grid.position.y = -1.5;
     scene.add(grid);
 
-    // Invisible Raycast Spatial Depth Plane (Facing Camera)
+    // Spatial Plane
     const geo = new THREE.PlaneGeometry(100, 100);
     const mat = new THREE.MeshBasicMaterial({ visible: false });
     spatialPlane = new THREE.Mesh(geo, mat);
@@ -400,12 +404,13 @@ function initThree() {
 
     raycaster = new THREE.Raycaster();
 
-    // Resize Handler
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
+
+    setupMouseInteractions();
 }
 
 function createMaterial(matType) {
@@ -448,19 +453,30 @@ function createMaterial(matType) {
 }
 
 /**
- * SECTION 4: SPATIAL RAYCASTING & GEOMETRY CREATION
+ * SECTION 4: SPATIAL RAYCASTING & INTERACTION
  */
 function getSpatialPoint(lm) {
     if (!lm) return null;
-    // Map MediaPipe screen [0,1] to Normalized Device Coords [-1, 1]
-    // Note: webcam canvas is scaleX(-1) mirrored visually
     const ndcX = -((1 - lm.x) * 2 - 1);
     const ndcY = -(lm.y * 2 - 1);
 
     const mouse = new THREE.Vector2(ndcX, ndcY);
     raycaster.setFromCamera(mouse, camera);
 
-    // Keep spatial plane aligned at camera target depth
+    spatialPlane.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(STATE.cameraDepth));
+    spatialPlane.lookAt(camera.position);
+
+    const hits = raycaster.intersectObject(spatialPlane);
+    return hits.length > 0 ? hits[0].point : null;
+}
+
+function getSpatialPointFromMouse(e) {
+    const mouse = new THREE.Vector2(
+        (e.clientX / window.innerWidth) * 2 - 1,
+        -(e.clientY / window.innerHeight) * 2 + 1
+    );
+    raycaster.setFromCamera(mouse, camera);
+
     spatialPlane.position.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(STATE.cameraDepth));
     spatialPlane.lookAt(camera.position);
 
@@ -469,7 +485,7 @@ function getSpatialPoint(lm) {
 }
 
 function spawnShapePrimitive(type, lm) {
-    const pt = getSpatialPoint(lm);
+    const pt = lm.x !== undefined ? getSpatialPoint(lm) : getSpatialPointFromMouse(lm);
     if (!pt) return;
 
     let geo;
@@ -524,9 +540,7 @@ function selectNearestObject(indexLm) {
         }
     });
 
-    if (closest) {
-        selectObject(closest);
-    }
+    if (closest) selectObject(closest);
 }
 
 function selectObject(obj) {
@@ -534,9 +548,25 @@ function selectObject(obj) {
         unselectObject();
     }
     STATE.selectedObj = obj;
+
+    // Highlight with 3D Bounding Box Outline
+    if (!STATE.selectionBox) {
+        STATE.selectionBox = new THREE.BoxHelper(obj, 0x00ff88);
+        scene.add(STATE.selectionBox);
+    } else {
+        STATE.selectionBox.setFromObject(obj);
+        STATE.selectionBox.visible = true;
+    }
+
     if (obj.material && obj.material.emissive) {
         obj.material.emissive.setHex(0x33ffaa);
     }
+
+    // Sync Scale Slider GUI
+    const currentScale = obj.scale.x;
+    scaleSlider.value = currentScale;
+    scaleVal.innerText = `${currentScale.toFixed(1)}×`;
+
     updateMetricsUI(obj);
 }
 
@@ -548,6 +578,10 @@ function unselectObject() {
         }
         STATE.selectedObj = null;
     }
+    if (STATE.selectionBox) {
+        STATE.selectionBox.visible = false;
+    }
+    updateMetricsUI(null);
 }
 
 function finalizeDrawing() {
@@ -561,9 +595,6 @@ function finalizeDrawing() {
     STATE.mode = 'IDLE';
 }
 
-/**
- * FIX: Safe Line Extrusion using BufferAttribute iteration
- */
 function extrudeLastLine() {
     if (!STATE.objects.length) return;
     const targetObj = STATE.selectedObj || STATE.objects[STATE.objects.length - 1];
@@ -577,7 +608,6 @@ function extrudeLastLine() {
         pts.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
     }
 
-    // Build smooth CatmullRom curve
     const curve = new THREE.CatmullRomCurve3(pts);
     const geo = new THREE.TubeGeometry(curve, 64, 0.07, 12, false);
     const mat = createMaterial(STATE.selectedMaterial);
@@ -597,9 +627,6 @@ function extrudeLastLine() {
     playSound('extrude');
 }
 
-/**
- * 3D LASER MEASUREMENT RULER LINE
- */
 function updateLaserLine(p1, p2) {
     if (!laserLine) {
         const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
@@ -621,7 +648,77 @@ function updateLaserLine(p1, p2) {
 }
 
 /**
- * SECTION 5: SPATIAL METRICS CALCULATIONS
+ * SECTION 5: DIRECT MOUSE & TOUCH SHAPE INTERACTION
+ */
+function setupMouseInteractions() {
+    let activePointerDown = false;
+    let dragStartPos = new THREE.Vector2();
+
+    webglCanvas.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return; // Left click only for object drag
+        initAudio();
+
+        const mouse = new THREE.Vector2(
+            (e.clientX / window.innerWidth) * 2 - 1,
+            -(e.clientY / window.innerHeight) * 2 + 1
+        );
+        raycaster.setFromCamera(mouse, camera);
+
+        const hits = raycaster.intersectObjects(STATE.objects, true);
+        if (hits.length > 0) {
+            const hitObj = hits[0].object;
+            selectObject(hitObj);
+            STATE.isDraggingObj = true;
+            orbitControls.enabled = false; // Disable camera orbit while dragging object
+            activePointerDown = true;
+            dragStartPos.set(e.clientX, e.clientY);
+        } else if (STATE.selectedShape !== 'DRAW') {
+            spawnShapePrimitive(STATE.selectedShape, e);
+        } else {
+            // Unselect if clicking empty space in draw mode
+            unselectObject();
+        }
+    });
+
+    webglCanvas.addEventListener('pointermove', (e) => {
+        if (STATE.isDraggingObj && STATE.selectedObj && activePointerDown) {
+            const pt = getSpatialPointFromMouse(e);
+            if (pt) {
+                STATE.selectedObj.position.copy(pt);
+                if (STATE.selectionBox) STATE.selectionBox.update();
+                updateMetricsUI(STATE.selectedObj);
+            }
+        }
+    });
+
+    const endDrag = () => {
+        if (STATE.isDraggingObj) {
+            STATE.isDraggingObj = false;
+            orbitControls.enabled = true;
+            activePointerDown = false;
+        }
+    };
+
+    webglCanvas.addEventListener('pointerup', endDrag);
+    webglCanvas.addEventListener('pointercancel', endDrag);
+
+    // Mouse Wheel Scale Selected Object
+    webglCanvas.addEventListener('wheel', (e) => {
+        if (STATE.selectedObj) {
+            e.preventDefault();
+            const delta = e.deltaY < 0 ? 0.1 : -0.1;
+            const newScale = Math.max(0.2, Math.min(3.0, STATE.selectedObj.scale.x + delta));
+            STATE.selectedObj.scale.set(newScale, newScale, newScale);
+            if (STATE.selectionBox) STATE.selectionBox.update();
+            scaleSlider.value = newScale;
+            scaleVal.innerText = `${newScale.toFixed(1)}×`;
+            updateMetricsUI(STATE.selectedObj);
+        }
+    }, { passive: false });
+}
+
+/**
+ * SECTION 6: SPATIAL METRICS CALCULATIONS
  */
 function updateMetricsUI(obj) {
     if (!obj || !obj.geometry) {
@@ -637,6 +734,7 @@ function updateMetricsUI(obj) {
     const bbox = obj.geometry.boundingBox;
     const size = new THREE.Vector3();
     bbox.getSize(size);
+    size.multiply(obj.scale);
 
     const type = obj.userData.shapeType || (obj.type === 'Line' ? '3D Curve' : 'Mesh');
     mName.innerText = type;
@@ -660,7 +758,6 @@ function computeMeshMetrics(geo, type, size) {
         edges = Math.round(vertices * 1.5);
     }
 
-    // Exact formulas for primitives, mesh sum for arbitrary geometry
     if (type === 'CUBE') {
         volume = size.x * size.y * size.z;
         area = 2 * (size.x * size.y + size.y * size.z + size.z * size.x);
@@ -684,7 +781,6 @@ function computeMeshMetrics(geo, type, size) {
         volume = 2 * Math.pow(Math.PI, 2) * R * Math.pow(r, 2);
         area = 4 * Math.pow(Math.PI, 2) * R * r;
     } else {
-        // Approximate Volume & Surface Area from Bounding Box / Buffer
         volume = size.x * size.y * size.z * 0.7;
         area = 2 * (size.x * size.y + size.y * size.z + size.z * size.x) * 0.8;
     }
@@ -693,7 +789,7 @@ function computeMeshMetrics(geo, type, size) {
 }
 
 /**
- * SECTION 6: ANIMATION LOOP
+ * SECTION 7: ANIMATION LOOP (NO RANDOM AUTOMATIC SPINS)
  */
 function animate() {
     requestAnimationFrame(animate);
@@ -701,7 +797,13 @@ function animate() {
     const delta = clock.getDelta();
     uiFps.innerText = Math.round(1 / (delta || 0.016));
 
-    // Object Manipulation when Grabbed
+    orbitControls.update();
+
+    if (STATE.selectionBox && STATE.selectedObj) {
+        STATE.selectionBox.update();
+    }
+
+    // Object Translation & Rotation via Hand Tracking
     if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
         const primaryLm = STATE.landmarks[0];
         const index = primaryLm[8];
@@ -710,11 +812,9 @@ function animate() {
 
         const targetPos = getSpatialPoint(index);
         if (targetPos) {
-            // Smoothly translate object to hand position
             STATE.selectedObj.position.lerp(targetPos, 0.2);
         }
 
-        // Calculate hand tilt angle for smooth X/Y rotation
         const wristVec = new THREE.Vector3(wrist.x, wrist.y, wrist.z || 0);
         const midVec = new THREE.Vector3(middle.x, middle.y, middle.z || 0);
         const dir = midVec.sub(wristVec);
@@ -737,7 +837,6 @@ function animate() {
             crosshair.style.top = `${(-(screenVec.y * 0.5) + 0.5) * window.innerHeight}px`;
 
             if (!STATE.currentLine) {
-                // Initialize line geometry with dynamic buffer attribute
                 STATE.linePoints = [pt.x, pt.y, pt.z];
                 const geo = new THREE.BufferGeometry();
                 geo.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
@@ -746,9 +845,7 @@ function animate() {
                 STATE.currentLine.userData = { shapeType: 'Freehand Line' };
                 scene.add(STATE.currentLine);
             } else {
-                // Append point efficiently without creating new Float32BufferAttribute
                 STATE.linePoints.push(pt.x, pt.y, pt.z);
-                const posAttr = STATE.currentLine.geometry.attributes.position;
                 STATE.currentLine.geometry.setAttribute('position', new THREE.Float32BufferAttribute(STATE.linePoints, 3));
                 STATE.currentLine.geometry.setDrawRange(0, STATE.linePoints.length / 3);
             }
@@ -758,23 +855,27 @@ function animate() {
         crosshair.classList.add('hidden');
     }
 
-    // Idle Object Slow Rotation for Visual Polish
-    STATE.objects.forEach(obj => {
-        if (obj !== STATE.selectedObj && obj.userData.isPrimitive) {
-            obj.rotation.y += 0.005;
-        }
-    });
-
     renderer.render(scene, camera);
 }
 
 /**
- * SECTION 7: UI EVENT HANDLERS & TOOLBAR BINDINGS
+ * SECTION 8: UI EVENT HANDLERS & TRANSFORM CONTROLS
  */
 function setupUIHandlers() {
     initAudio();
 
-    // Shape Primitive Selection
+    // Panel Collapse Toggle Buttons
+    document.querySelectorAll('.btn-toggle-panel').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const panel = document.getElementById(e.currentTarget.dataset.target);
+            if (panel) {
+                panel.classList.toggle('collapsed');
+                e.currentTarget.innerText = panel.classList.contains('collapsed') ? '+' : '−';
+            }
+        });
+    });
+
+    // Shape Selection
     document.querySelectorAll('.tool-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -785,7 +886,7 @@ function setupUIHandlers() {
         });
     });
 
-    // Material Shader Selection
+    // Material Selection
     document.querySelectorAll('.mat-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
@@ -793,7 +894,6 @@ function setupUIHandlers() {
             target.classList.add('active');
             STATE.selectedMaterial = target.dataset.mat;
 
-            // Apply material live to selected object if any
             if (STATE.selectedObj && STATE.selectedObj.type === 'Mesh') {
                 STATE.selectedObj.material = createMaterial(STATE.selectedMaterial);
             }
@@ -801,14 +901,47 @@ function setupUIHandlers() {
         });
     });
 
-    // Action Buttons
+    // GUI Transform Controls for Scale Slider & Rotation Buttons
+    scaleSlider.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        scaleVal.innerText = `${val.toFixed(1)}×`;
+        if (STATE.selectedObj) {
+            STATE.selectedObj.scale.set(val, val, val);
+            if (STATE.selectionBox) STATE.selectionBox.update();
+            updateMetricsUI(STATE.selectedObj);
+        }
+    });
+
+    document.getElementById('btn-rot-x').onclick = () => {
+        if (STATE.selectedObj) {
+            STATE.selectedObj.rotation.x += Math.PI / 4;
+            if (STATE.selectionBox) STATE.selectionBox.update();
+        }
+    };
+
+    document.getElementById('btn-rot-y').onclick = () => {
+        if (STATE.selectedObj) {
+            STATE.selectedObj.rotation.y += Math.PI / 4;
+            if (STATE.selectionBox) STATE.selectionBox.update();
+        }
+    };
+
+    document.getElementById('btn-rot-z').onclick = () => {
+        if (STATE.selectedObj) {
+            STATE.selectedObj.rotation.z += Math.PI / 4;
+            if (STATE.selectionBox) STATE.selectionBox.update();
+        }
+    };
+
+    document.getElementById('btn-delete').onclick = () => deleteSelectedObject();
+
+    // Scene Buttons
     document.getElementById('btn-extrude').onclick = () => extrudeLastLine();
 
     document.getElementById('btn-reset').onclick = () => {
         STATE.objects.forEach(o => { scene.remove(o); o.geometry.dispose(); });
         STATE.objects = [];
         unselectObject();
-        updateMetricsUI(null);
         playSound('clear');
     };
 
@@ -823,6 +956,17 @@ function setupUIHandlers() {
     };
 }
 
+function deleteSelectedObject() {
+    if (!STATE.selectedObj) return;
+    const obj = STATE.selectedObj;
+    scene.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    const idx = STATE.objects.indexOf(obj);
+    if (idx !== -1) STATE.objects.splice(idx, 1);
+    unselectObject();
+    playSound('clear');
+}
+
 function updateUI(conf) {
     uiGesture.innerText = STATE.gesture;
     uiMode.innerText = `MODE: ${STATE.mode}`;
@@ -835,44 +979,6 @@ function updateUI(conf) {
     const pct = Math.min(100, Math.round(conf * 100));
     uiTrack.style.width = `${pct}%`;
     uiTrackVal.innerText = `${pct}%`;
-}
-
-/**
- * SECTION 8: MOUSE FALLBACK TESTING FOR DESKTOP WITHOUT WEBCAM
- */
-function enableMouseFallback() {
-    let isMouseDown = false;
-
-    window.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.panel')) return; // Ignore clicks on UI panel
-        isMouseDown = true;
-        initAudio();
-
-        const mouseLm = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
-        STATE.landmarks = [[mouseLm]];
-
-        if (STATE.selectedShape === 'DRAW') {
-            STATE.mode = 'DRAWING';
-            STATE.gesture = 'PINCH';
-        } else {
-            spawnShapePrimitive(STATE.selectedShape, mouseLm);
-        }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (!isMouseDown) return;
-        const mouseLm = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
-        STATE.landmarks = [[mouseLm]];
-    });
-
-    window.addEventListener('mouseup', () => {
-        if (isMouseDown) {
-            isMouseDown = false;
-            if (STATE.mode === 'DRAWING') finalizeDrawing();
-            STATE.mode = 'IDLE';
-            STATE.gesture = 'OPEN';
-        }
-    });
 }
 
 // APPLICATION STARTUP
