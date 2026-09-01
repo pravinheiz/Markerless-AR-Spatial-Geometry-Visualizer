@@ -9,7 +9,7 @@ const CFG = {
     PINCH_ENTER: 0.048,
     PINCH_EXIT: 0.068,
     GRAB_DIST: 0.28,
-    ROT_SENS: 0.06,
+    ROT_SENS: 0.08,
     COLORS: {
         PRIMARY: 0x00ff88,
         ACCENT: 0x00ccff,
@@ -23,12 +23,12 @@ const CFG = {
  * STATE MANAGEMENT
  */
 const STATE = {
-    mode: 'IDLE', // IDLE, DRAWING, GRABBED, EXTRUDING, MEASURING
+    mode: 'IDLE', // IDLE, DRAWING, GRABBED, EXTRUDING, MEASURING, HOLOGRAPHIC
     gesture: 'NONE',
-    selectedShape: 'DRAW', // DRAW, CUBE, SPHERE, CYLINDER, CONE, TORUS, PYRAMID
-    selectedMaterial: 'HOLOGRAM', // HOLOGRAM, GLASS, METAL, NEON
+    selectedShape: 'DRAW',
+    selectedMaterial: 'HOLOGRAM',
     hands: [],
-    landmarks: [], // Smoothed 3D landmarks
+    landmarks: [],
     objects: [],
     selectedObj: null,
     selectionBox: null,
@@ -38,7 +38,13 @@ const STATE = {
     enableSFX: true,
     isPinching: false,
     cameraDepth: 3.5,
-    isDraggingObj: false
+    isDraggingObj: false,
+    
+    // Tony Stark & Oculus Hand Pointer State
+    hoveredUIElement: null,
+    initTwoHandDistance: null,
+    initTwoHandScale: 1,
+    initTwoHandAngle: 0
 };
 
 // DOM ELEMENTS
@@ -94,14 +100,14 @@ function playSound(type) {
 
     const now = audioCtx.currentTime;
 
-    if (type === 'pinch') {
+    if (type === 'pinch' || type === 'click') {
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        osc.frequency.setValueAtTime(520, now);
+        osc.frequency.exponentialRampToValueAtTime(1040, now + 0.1);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         osc.start(now);
-        osc.stop(now + 0.12);
+        osc.stop(now + 0.1);
     } else if (type === 'spawn') {
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(300, now);
@@ -120,9 +126,9 @@ function playSound(type) {
         osc.stop(now + 0.25);
     } else if (type === 'grab') {
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(180, now);
-        osc.frequency.exponentialRampToValueAtTime(90, now + 0.15);
-        gain.gain.setValueAtTime(0.2, now);
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.15);
+        gain.gain.setValueAtTime(0.22, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
         osc.start(now);
         osc.stop(now + 0.15);
@@ -138,7 +144,7 @@ function playSound(type) {
 }
 
 /**
- * SECTION 2: MEDIAPIPE HAND TRACKING & SMOOTHING
+ * SECTION 2: MEDIAPIPE HAND TRACKING & LATERATION CORRECTION
  */
 const prevLandmarks = [];
 
@@ -207,6 +213,7 @@ function onHandsResults(results) {
         if (STATE.mode === 'GRABBED') unselectObject();
         if (laserLine) laserLine.visible = false;
         rulerDisplay.classList.add('hidden');
+        clearUIHover();
         if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         updateUI(0);
         return;
@@ -243,14 +250,22 @@ function onHandsResults(results) {
         getDistance(pinky, wrist) / handScale < 1.3
     );
 
+    // Oculus Quest UI Hand Pointer Processing
+    processOculusHandPointer(index, pinchDist);
+
     if (!STATE.isPinching && pinchDist < CFG.PINCH_ENTER) {
         STATE.isPinching = true;
         playSound('pinch');
+        // Handle UI Button Pinch Click
+        if (STATE.hoveredUIElement) {
+            STATE.hoveredUIElement.click();
+            playSound('click');
+        }
     } else if (STATE.isPinching && pinchDist > CFG.PINCH_EXIT) {
         STATE.isPinching = false;
     }
 
-    // PHASE 3: Two-Hand Measurement Check
+    // PHASE 3: Tony Stark Dual-Hand Hologram Manipulation & Measurement
     let isTwoHand = false;
     if (STATE.landmarks.length === 2) {
         const h1 = STATE.landmarks[0][8];
@@ -262,36 +277,66 @@ function onHandsResults(results) {
             
             if (pt1 && pt2) {
                 isTwoHand = true;
-                const distMeters = pt1.distanceTo(pt2);
+                const currentDist = pt1.distanceTo(pt2);
                 
                 rulerDisplay.classList.remove('hidden');
-                rulerVal.innerText = `${distMeters.toFixed(2)} m`;
+                rulerVal.innerText = `${currentDist.toFixed(2)} m`;
                 updateLaserLine(pt1, pt2);
 
-                const vertDiff = Math.abs(h1.y - h2.y);
-                if (vertDiff > 0.25 && STATE.gesture === 'PINCH') {
-                    STATE.mode = 'EXTRUDING';
-                    extrudeLastLine();
-                } else {
+                // Tony Stark 2-Hand Hologram Pinch Scale & Rotate
+                const p1Pinch = getDistance(STATE.landmarks[0][4], STATE.landmarks[0][8]) < CFG.PINCH_EXIT;
+                const p2Pinch = getDistance(STATE.landmarks[1][4], STATE.landmarks[1][8]) < CFG.PINCH_EXIT;
+
+                if (p1Pinch && p2Pinch && STATE.selectedObj) {
                     STATE.gesture = 'TWO_HAND';
-                    STATE.mode = 'MEASURING';
+                    STATE.mode = 'HOLOGRAPHIC';
+
+                    if (STATE.initTwoHandDistance === null) {
+                        STATE.initTwoHandDistance = currentDist;
+                        STATE.initTwoHandScale = STATE.selectedObj.scale.x;
+                    } else {
+                        const ratio = currentDist / STATE.initTwoHandDistance;
+                        const newScale = Math.max(0.2, Math.min(4.0, STATE.initTwoHandScale * ratio));
+                        STATE.selectedObj.scale.set(newScale, newScale, newScale);
+                        if (STATE.selectionBox) STATE.selectionBox.update();
+                        scaleSlider.value = newScale;
+                        scaleVal.innerText = `${newScale.toFixed(1)}×`;
+                        updateMetricsUI(STATE.selectedObj);
+                    }
+
+                    // 2-Hand Angle Roll Rotation
+                    const angle = Math.atan2(h2.y - h1.y, h2.x - h1.x);
+                    STATE.selectedObj.rotation.z += (angle - STATE.initTwoHandAngle) * 0.1;
+                    STATE.initTwoHandAngle = angle;
+
+                } else {
+                    STATE.initTwoHandDistance = null;
+                    const vertDiff = Math.abs(h1.y - h2.y);
+                    if (vertDiff > 0.25 && STATE.gesture === 'PINCH') {
+                        STATE.mode = 'EXTRUDING';
+                        extrudeLastLine();
+                    } else {
+                        STATE.gesture = 'TWO_HAND';
+                        STATE.mode = 'MEASURING';
+                    }
                 }
             }
         }
     } else {
         if (laserLine) laserLine.visible = false;
         rulerDisplay.classList.add('hidden');
+        STATE.initTwoHandDistance = null;
     }
 
     // PHASE 4: Primary Gesture State Machine
     if (!isTwoHand) {
         if (STATE.isPinching) {
             STATE.gesture = 'PINCH';
-            if (STATE.selectedShape === 'DRAW') {
+            if (STATE.selectedShape === 'DRAW' && !STATE.hoveredUIElement) {
                 if (STATE.mode !== 'DRAWING') {
                     STATE.mode = 'DRAWING';
                 }
-            } else {
+            } else if (!STATE.hoveredUIElement) {
                 spawnShapePrimitive(STATE.selectedShape, index);
                 STATE.isPinching = false;
             }
@@ -315,6 +360,44 @@ function onHandsResults(results) {
     updateUI(totalConf / (STATE.hands.length || 1));
 }
 
+/**
+ * OCULUS QUEST STYLE HAND UI POINTER & TOUCH
+ */
+function processOculusHandPointer(indexLm, pinchDist) {
+    if (!indexLm) {
+        clearUIHover();
+        return;
+    }
+
+    // In mirrored display: screenX = (1 - indexLm.x) * width
+    const screenX = (1 - indexLm.x) * window.innerWidth;
+    const screenY = indexLm.y * window.innerHeight;
+
+    // Check UI element under hand pointer
+    const elem = document.elementFromPoint(screenX, screenY);
+    const targetBtn = elem ? elem.closest('button, .tool-btn, .mat-btn, .btn-action, .sm-btn, .btn-toggle-panel') : null;
+
+    if (targetBtn) {
+        if (STATE.hoveredUIElement !== targetBtn) {
+            clearUIHover();
+            STATE.hoveredUIElement = targetBtn;
+            targetBtn.classList.add('hand-hover');
+        }
+    } else {
+        clearUIHover();
+    }
+}
+
+function clearUIHover() {
+    if (STATE.hoveredUIElement) {
+        STATE.hoveredUIElement.classList.remove('hand-hover');
+        STATE.hoveredUIElement = null;
+    }
+}
+
+/**
+ * HAND SKELETON & OCULUS POINTER RENDERER
+ */
 function drawSkeleton(lm, handIdx) {
     const color = handIdx === 0 ? '#00ff88' : '#00ccff';
     handCtx.strokeStyle = color;
@@ -333,6 +416,7 @@ function drawSkeleton(lm, handIdx) {
     connections.forEach(([i, j]) => {
         const p1 = lm[i];
         const p2 = lm[j];
+        // Correct 1-to-1 pixel mapping in scaleX(-1) mirrored canvas
         handCtx.moveTo(p1.x * handCanvas.width, p1.y * handCanvas.height);
         handCtx.lineTo(p2.x * handCanvas.width, p2.y * handCanvas.height);
     });
@@ -350,6 +434,20 @@ function drawSkeleton(lm, handIdx) {
             handCtx.stroke();
         }
     });
+
+    // Draw Oculus Quest Index Fingertip Holographic Pointer Cursor
+    const indexTip = lm[8];
+    if (indexTip && handIdx === 0) {
+        handCtx.beginPath();
+        handCtx.arc(indexTip.x * handCanvas.width, indexTip.y * handCanvas.height, STATE.isPinching ? 9 : 14, 0, Math.PI * 2);
+        handCtx.strokeStyle = STATE.isPinching ? '#00ff88' : '#00ccff';
+        handCtx.lineWidth = 2;
+        handCtx.stroke();
+        if (STATE.isPinching) {
+            handCtx.fillStyle = 'rgba(0, 255, 136, 0.4)';
+            handCtx.fill();
+        }
+    }
 }
 
 /**
@@ -369,7 +467,6 @@ function initThree() {
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    // Orbit Controls for smooth mouse navigation
     orbitControls = new OrbitControls(camera, renderer.domElement);
     orbitControls.enableDamping = true;
     orbitControls.dampingFactor = 0.05;
@@ -391,12 +488,12 @@ function initThree() {
     pointLight.position.set(-3, 3, 2);
     scene.add(pointLight);
 
-    // Grid
+    // Spatial Grid
     const grid = new THREE.GridHelper(12, 12, 0x00ff88, 0x1f2d3d);
     grid.position.y = -1.5;
     scene.add(grid);
 
-    // Spatial Plane
+    // Spatial Depth Raycast Plane
     const geo = new THREE.PlaneGeometry(100, 100);
     const mat = new THREE.MeshBasicMaterial({ visible: false });
     spatialPlane = new THREE.Mesh(geo, mat);
@@ -453,11 +550,13 @@ function createMaterial(matType) {
 }
 
 /**
- * SECTION 4: SPATIAL RAYCASTING & INTERACTION
+ * SECTION 4: EXACT LATERATION SPATIAL RAYCASTING
  */
 function getSpatialPoint(lm) {
     if (!lm) return null;
-    const ndcX = -((1 - lm.x) * 2 - 1);
+    // Mirrored display: screen X ratio is (1 - lm.x)
+    // NDC X = (1 - lm.x) * 2 - 1 = 1 - 2 * lm.x
+    const ndcX = 1 - 2 * lm.x;
     const ndcY = -(lm.y * 2 - 1);
 
     const mouse = new THREE.Vector2(ndcX, ndcY);
@@ -549,7 +648,6 @@ function selectObject(obj) {
     }
     STATE.selectedObj = obj;
 
-    // Highlight with 3D Bounding Box Outline
     if (!STATE.selectionBox) {
         STATE.selectionBox = new THREE.BoxHelper(obj, 0x00ff88);
         scene.add(STATE.selectionBox);
@@ -562,7 +660,6 @@ function selectObject(obj) {
         obj.material.emissive.setHex(0x33ffaa);
     }
 
-    // Sync Scale Slider GUI
     const currentScale = obj.scale.x;
     scaleSlider.value = currentScale;
     scaleVal.innerText = `${currentScale.toFixed(1)}×`;
@@ -648,14 +745,13 @@ function updateLaserLine(p1, p2) {
 }
 
 /**
- * SECTION 5: DIRECT MOUSE & TOUCH SHAPE INTERACTION
+ * SECTION 5: MOUSE / POINTER INTERACTION
  */
 function setupMouseInteractions() {
     let activePointerDown = false;
-    let dragStartPos = new THREE.Vector2();
 
     webglCanvas.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) return; // Left click only for object drag
+        if (e.button !== 0) return;
         initAudio();
 
         const mouse = new THREE.Vector2(
@@ -669,13 +765,11 @@ function setupMouseInteractions() {
             const hitObj = hits[0].object;
             selectObject(hitObj);
             STATE.isDraggingObj = true;
-            orbitControls.enabled = false; // Disable camera orbit while dragging object
+            orbitControls.enabled = false;
             activePointerDown = true;
-            dragStartPos.set(e.clientX, e.clientY);
         } else if (STATE.selectedShape !== 'DRAW') {
             spawnShapePrimitive(STATE.selectedShape, e);
         } else {
-            // Unselect if clicking empty space in draw mode
             unselectObject();
         }
     });
@@ -702,7 +796,6 @@ function setupMouseInteractions() {
     webglCanvas.addEventListener('pointerup', endDrag);
     webglCanvas.addEventListener('pointercancel', endDrag);
 
-    // Mouse Wheel Scale Selected Object
     webglCanvas.addEventListener('wheel', (e) => {
         if (STATE.selectedObj) {
             e.preventDefault();
@@ -789,7 +882,7 @@ function computeMeshMetrics(geo, type, size) {
 }
 
 /**
- * SECTION 7: ANIMATION LOOP (NO RANDOM AUTOMATIC SPINS)
+ * SECTION 7: ANIMATION LOOP & TONY STARK 6-DOF HAND CONTROL
  */
 function animate() {
     requestAnimationFrame(animate);
@@ -803,24 +896,32 @@ function animate() {
         STATE.selectionBox.update();
     }
 
-    // Object Translation & Rotation via Hand Tracking
+    // TONY STARK 6-DOF HOLOGRAPHIC HAND MANIPULATION
     if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
         const primaryLm = STATE.landmarks[0];
         const index = primaryLm[8];
         const wrist = primaryLm[0];
         const middle = primaryLm[12];
+        const pinky = primaryLm[20];
+        const thumb = primaryLm[4];
 
+        // 1. 3D Position Translation
         const targetPos = getSpatialPoint(index);
         if (targetPos) {
-            STATE.selectedObj.position.lerp(targetPos, 0.2);
+            STATE.selectedObj.position.lerp(targetPos, 0.22);
         }
 
-        const wristVec = new THREE.Vector3(wrist.x, wrist.y, wrist.z || 0);
-        const midVec = new THREE.Vector3(middle.x, middle.y, middle.z || 0);
-        const dir = midVec.sub(wristVec);
+        // 2. 6-DOF 3D Holographic Orientation (Pitch, Yaw, Roll)
+        // Pitch: Wrist to Middle Finger tilt angle
+        const pitchAngle = (middle.y - wrist.y) * 4.0;
+        // Yaw: Wrist to Index/Pinky lateral angle
+        const yawAngle = -(index.x - pinky.x) * 4.0;
+        // Roll: Thumb to Pinky rotation
+        const rollAngle = Math.atan2(thumb.y - pinky.y, thumb.x - pinky.x);
 
-        STATE.selectedObj.rotation.x += dir.y * CFG.ROT_SENS;
-        STATE.selectedObj.rotation.y += -dir.x * CFG.ROT_SENS;
+        STATE.selectedObj.rotation.x = THREE.MathUtils.lerp(STATE.selectedObj.rotation.x, pitchAngle, 0.1);
+        STATE.selectedObj.rotation.y = THREE.MathUtils.lerp(STATE.selectedObj.rotation.y, yawAngle, 0.1);
+        STATE.selectedObj.rotation.z = THREE.MathUtils.lerp(STATE.selectedObj.rotation.z, rollAngle, 0.1);
 
         updateMetricsUI(STATE.selectedObj);
     }
@@ -901,7 +1002,7 @@ function setupUIHandlers() {
         });
     });
 
-    // GUI Transform Controls for Scale Slider & Rotation Buttons
+    // GUI Transform Controls
     scaleSlider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         scaleVal.innerText = `${val.toFixed(1)}×`;
@@ -935,7 +1036,6 @@ function setupUIHandlers() {
 
     document.getElementById('btn-delete').onclick = () => deleteSelectedObject();
 
-    // Scene Buttons
     document.getElementById('btn-extrude').onclick = () => extrudeLastLine();
 
     document.getElementById('btn-reset').onclick = () => {

@@ -114,9 +114,11 @@ body {
     line-height: 1;
     transition: all 0.2s ease;
 }
-.btn-toggle-panel:hover {
-    background: rgba(255, 255, 255, 0.2);
+.btn-toggle-panel:hover, .btn-toggle-panel.hand-hover {
+    background: rgba(255, 255, 255, 0.25);
     color: #ffffff;
+    border-color: var(--primary);
+    box-shadow: 0 0 10px var(--primary);
 }
 
 .panel.collapsed .panel-body {
@@ -237,10 +239,13 @@ h3 {
     transition: all 0.2s ease;
 }
 
-.tool-btn:hover, .mat-btn:hover, .btn-action:hover, .sm-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
+.tool-btn:hover, .mat-btn:hover, .btn-action:hover, .sm-btn:hover,
+.tool-btn.hand-hover, .mat-btn.hand-hover, .btn-action.hand-hover, .sm-btn.hand-hover {
+    background: rgba(0, 204, 255, 0.2);
     color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.3);
+    border-color: var(--accent);
+    box-shadow: 0 0 14px rgba(0, 204, 255, 0.4);
+    transform: translateY(-1px);
 }
 
 .tool-btn.active, .mat-btn.active {
@@ -291,9 +296,10 @@ h3 {
     color: var(--danger);
     border-color: rgba(255, 51, 102, 0.3);
 }
-.sm-btn.danger:hover {
-    background: rgba(255, 51, 102, 0.2);
+.sm-btn.danger:hover, .sm-btn.danger.hand-hover {
+    background: rgba(255, 51, 102, 0.25);
     border-color: var(--danger);
+    box-shadow: 0 0 12px rgba(255, 51, 102, 0.4);
 }
 
 .btn-action {
@@ -304,8 +310,8 @@ h3 {
     color: var(--danger);
     border-color: rgba(255, 51, 102, 0.3);
 }
-.btn-action.danger:hover {
-    background: rgba(255, 51, 102, 0.2);
+.btn-action.danger:hover, .btn-action.danger.hand-hover {
+    background: rgba(255, 51, 102, 0.25);
     border-color: var(--danger);
 }
 
@@ -369,6 +375,25 @@ ul {
     text-align: right;
 }
 #fps-val { color: var(--primary); font-weight: 700; }
+
+/* OCULUS QUEST & TONY STARK HAND POINTER CURSOR */
+.hand-pointer-ring {
+    position: absolute;
+    width: 24px; height: 24px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 0 12px var(--accent);
+    transition: width 0.15s, height 0.15s, border-color 0.15s;
+    z-index: 50;
+}
+.hand-pointer-ring.pinching {
+    width: 14px; height: 14px;
+    border-color: var(--primary);
+    background: rgba(0, 255, 136, 0.4);
+    box-shadow: 0 0 18px var(--primary);
+}
 
 /* OVERLAYS & PILLS */
 .ruler-pill {
