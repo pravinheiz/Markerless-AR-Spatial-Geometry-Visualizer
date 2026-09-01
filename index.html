@@ -54,7 +54,7 @@
             <div class="panel-body">
                 <div class="status-box">
                     <div id="gesture-display" class="status">INITIALIZING...</div>
-                    <div id="mode-display" class="sub-status">MODE: IDLE</div>
+                    <div id="mode-display" class="sub-status">MODE: SELECT</div>
                 </div>
                 <div class="tracking-meter">
                     <div class="track-info">
@@ -75,9 +75,10 @@
             <div class="panel-body">
                 <!-- SHAPES PRIMITIVES TOOLBAR -->
                 <div class="tool-group">
-                    <div class="tool-label">SPAWN / DRAW SHAPE</div>
+                    <div class="tool-label">MODE / SPAWN SHAPE</div>
                     <div class="grid-buttons">
-                        <button class="tool-btn active" data-shape="DRAW" title="Freehand 3D Draw (Auto-completes shapes)">✏️ Draw</button>
+                        <button class="tool-btn active" data-shape="SELECT" title="Default Select / Grab Mode (No accidental drawing)">👆 Select / Grab</button>
+                        <button class="tool-btn" data-shape="DRAW" title="Explicit 3D Draw Mode">✏️ Draw 3D</button>
                         <button class="tool-btn" data-shape="CUBE" title="Spawn Cube">🧊 Cube</button>
                         <button class="tool-btn" data-shape="SPHERE" title="Spawn Sphere">🔮 Sphere</button>
                         <button class="tool-btn" data-shape="CYLINDER" title="Spawn Cylinder">🛢️ Cylinder</button>
@@ -100,7 +101,7 @@
 
                 <!-- TRANSFORM CONTROLS -->
                 <div class="tool-group transform-controls">
-                    <div class="tool-label">OBJECT TRANSFORM</div>
+                    <div class="tool-label">ACTIVE OBJECT TRANSFORM</div>
                     <div class="slider-row">
                         <span>Scale:</span>
                         <input type="range" id="scale-slider" min="0.2" max="4.0" step="0.1" value="1.0">
@@ -132,7 +133,7 @@
         <!-- BOTTOM RIGHT: Spatial Metrics HUD Card -->
         <div class="panel bottom-right glow-card" id="panel-metrics">
             <div class="panel-header">
-                <div class="hud-header">SPATIAL METRICS</div>
+                <div class="hud-header">ACTIVE OBJECT METRICS</div>
                 <button class="btn-toggle-panel" data-target="panel-metrics" title="Collapse panel">−</button>
             </div>
             <div class="panel-body">
@@ -149,11 +150,11 @@
 
         <!-- DYNAMIC OVERLAYS -->
         <div id="ruler-display" class="ruler-pill hidden">
-            <span>IRON MAN ZOOM / DIST: </span><strong id="ruler-val">1.00×</strong>
+            <span>ZOOM / SCALE: </span><strong id="ruler-val">1.00×</strong>
         </div>
 
         <div id="crosshair" class="hidden">+</div>
-        <div id="prompt" class="hidden">PINCH TO DRAW / SPAWN</div>
+        <div id="prompt" class="hidden">DRAWING ACTIVE</div>
 
         <!-- INTERACTIVE GESTURE HELP GUIDE MODAL -->
         <div id="gesture-guide-modal" class="modal-card hidden glow-card">
@@ -164,24 +165,31 @@
             <div class="modal-body">
                 <div class="gesture-grid">
                     <div class="gesture-card">
+                        <div class="g-icon">👆</div>
+                        <div class="g-info">
+                            <strong>Select / Grab Mode</strong>
+                            <p>Default active mode. Prevents accidental drawing when waving hand in front of camera.</p>
+                        </div>
+                    </div>
+                    <div class="gesture-card">
                         <div class="g-icon">🤏</div>
                         <div class="g-info">
-                            <strong>Single Pinch</strong>
-                            <p>Draw 3D curve (Auto-completes shapes), spawn selected primitive, or click UI buttons.</p>
+                            <strong>Single Pinch & Pull</strong>
+                            <p>Draw 3D curves (in Draw mode) or Pull forward/backward to Zoom active object (in Select mode).</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">✊</div>
                         <div class="g-info">
-                            <strong>Fist / Grab</strong>
-                            <p>6-DOF Iron Man translation & 3D wrist tilt rotation (Pitch, Yaw, Roll).</p>
+                            <strong>Targeted Hologram Grab</strong>
+                            <p>Locks focus on active object for 6-DOF translation & 3D wrist tilt rotation.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
                         <div class="g-icon">🤏🤏</div>
                         <div class="g-info">
-                            <strong>Dual Pinch Zoom</strong>
-                            <p>Iron Man Zoom In / Zoom Out & 3D hologram scaling by spreading or closing pinched hands.</p>
+                            <strong>Dual-Hand Pinch Zoom</strong>
+                            <p>Spread or close 2 pinched hands to scale active target object or scene like Iron Man.</p>
                         </div>
                     </div>
                     <div class="gesture-card">
@@ -192,17 +200,10 @@
                         </div>
                     </div>
                     <div class="gesture-card">
-                        <div class="g-icon">📏</div>
-                        <div class="g-info">
-                            <strong>2-Hand Spread</strong>
-                            <p>AR Spatial Measurement Ruler (measures real-time distance in meters).</p>
-                        </div>
-                    </div>
-                    <div class="gesture-card">
                         <div class="g-icon">🖐️</div>
                         <div class="g-info">
-                            <strong>Open Palm Pointer</strong>
-                            <p>Oculus Quest holographic index fingertip pointer for hovering and selecting.</p>
+                            <strong>Oculus Hand Pointer</strong>
+                            <p>Index fingertip pointer for hovering and clicking UI buttons without accidental drawing.</p>
                         </div>
                     </div>
                 </div>

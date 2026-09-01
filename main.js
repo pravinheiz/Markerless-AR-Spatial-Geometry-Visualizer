@@ -6,8 +6,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
  */
 const CFG = {
     SMOOTHING: 0.35,
-    PINCH_ENTER: 0.048,
-    PINCH_EXIT: 0.068,
+    PINCH_ENTER: 0.038, // Tight pinch to prevent accidental triggers during hand waving
+    PINCH_EXIT: 0.058,
     GRAB_DIST: 0.28,
     ROT_SENS: 0.08,
     COLORS: {
@@ -25,25 +25,28 @@ const CFG = {
 const STATE = {
     mode: 'IDLE', // IDLE, DRAWING, GRABBED, EXTRUDING, MEASURING, HOLOGRAPHIC
     gesture: 'NONE',
-    selectedShape: 'DRAW',
+    selectedShape: 'SELECT', // Default to SELECT/GRAB mode to prevent accidental drawing when waving hand!
     selectedMaterial: 'HOLOGRAM',
     hands: [],
     landmarks: [],
     objects: [],
-    selectedObj: null,
+    selectedObj: null, // Active Target Object (Iron Man single object isolation)
     selectionBox: null,
     currentLine: null,
     linePoints: [],
     showSkeleton: true,
     enableSFX: true,
     isPinching: false,
+    pinchFrameCount: 0,
     cameraDepth: 3.5,
     isDraggingObj: false,
     
-    // Iron Man Dual Pinch Zoom & Hologram State
+    // Single-Hand & Dual-Hand Zoom State
     hoveredUIElement: null,
+    initPinchPos: null,
+    initPinchScale: 1.0,
     initTwoHandDistance: null,
-    initTwoHandScale: 1,
+    initTwoHandScale: 1.0,
     initTwoHandAngle: 0,
     initCameraZ: 3.5
 };
@@ -223,6 +226,8 @@ function onHandsResults(results) {
         if (laserLine) laserLine.visible = false;
         rulerDisplay.classList.add('hidden');
         clearUIHover();
+        STATE.pinchFrameCount = 0;
+        STATE.initPinchPos = null;
         if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         updateUI(0);
         return;
@@ -261,18 +266,25 @@ function onHandsResults(results) {
 
     processOculusHandPointer(index, pinchDist);
 
-    if (!STATE.isPinching && pinchDist < CFG.PINCH_ENTER) {
+    // ANTI-ACCIDENTAL DRAWING: Require tight pinch held for 2+ consecutive frames
+    if (pinchDist < CFG.PINCH_ENTER) {
+        STATE.pinchFrameCount++;
+    } else if (pinchDist > CFG.PINCH_EXIT) {
+        STATE.pinchFrameCount = 0;
+        STATE.isPinching = false;
+        STATE.initPinchPos = null;
+    }
+
+    if (!STATE.isPinching && STATE.pinchFrameCount >= 2) {
         STATE.isPinching = true;
         playSound('pinch');
         if (STATE.hoveredUIElement) {
             STATE.hoveredUIElement.click();
             playSound('click');
         }
-    } else if (STATE.isPinching && pinchDist > CFG.PINCH_EXIT) {
-        STATE.isPinching = false;
     }
 
-    // PHASE 3: Iron Man Dual-Hand Pinch Zoom In / Out & Hologram Scale
+    // PHASE 3: Iron Man Single-Hand Pinch & Pull Zoom + 2-Hand Zoom
     let isTwoHand = false;
     if (STATE.landmarks.length === 2) {
         const h1 = STATE.landmarks[0][8];
@@ -301,7 +313,7 @@ function onHandsResults(results) {
                         const ratio = currentDist / STATE.initTwoHandDistance;
 
                         if (STATE.selectedObj) {
-                            // Scale Selected Hologram Shape
+                            // Scale Exclusive Active Target Object ONLY
                             const newScale = Math.max(0.2, Math.min(5.0, STATE.initTwoHandScale * ratio));
                             STATE.selectedObj.scale.set(newScale, newScale, newScale);
                             if (STATE.selectionBox) STATE.selectionBox.update();
@@ -310,14 +322,13 @@ function onHandsResults(results) {
                             updateMetricsUI(STATE.selectedObj);
 
                             rulerDisplay.classList.remove('hidden');
-                            rulerVal.innerText = `SHAPE SCALE: ${newScale.toFixed(2)}×`;
+                            rulerVal.innerText = `ACTIVE SHAPE SCALE: ${newScale.toFixed(2)}×`;
                         } else {
-                            // Iron Man Scene Zoom In / Zoom Out
                             const newZ = Math.max(1.5, Math.min(8.0, STATE.initCameraZ / ratio));
                             camera.position.z = THREE.MathUtils.lerp(camera.position.z, newZ, 0.15);
 
                             rulerDisplay.classList.remove('hidden');
-                            rulerVal.innerText = `IRON MAN ZOOM: ${ratio.toFixed(2)}×`;
+                            rulerVal.innerText = `IRON MAN SCENE ZOOM: ${ratio.toFixed(2)}×`;
                         }
                     }
 
@@ -346,17 +357,49 @@ function onHandsResults(results) {
         STATE.initTwoHandDistance = null;
     }
 
+    // SINGLE-HAND PINCH & PULL ZOOM (when in SELECT mode or active object selected)
+    if (!isTwoHand && STATE.isPinching && STATE.selectedShape === 'SELECT') {
+        const pPt = getSpatialPoint(index);
+        if (pPt) {
+            if (!STATE.initPinchPos) {
+                STATE.initPinchPos = pPt.clone();
+                STATE.initPinchScale = STATE.selectedObj ? STATE.selectedObj.scale.x : 1.0;
+            } else {
+                // Vertical / Z depth pinch drag distance
+                const dy = (pPt.y - STATE.initPinchPos.y) * 2.5;
+                if (Math.abs(dy) > 0.05) {
+                    STATE.gesture = 'SINGLE_PINCH_ZOOM';
+                    const newScale = Math.max(0.2, Math.min(5.0, STATE.initPinchScale * (1 + dy)));
+                    
+                    if (STATE.selectedObj) {
+                        STATE.selectedObj.scale.set(newScale, newScale, newScale);
+                        if (STATE.selectionBox) STATE.selectionBox.update();
+                        scaleSlider.value = newScale;
+                        scaleVal.innerText = `${newScale.toFixed(1)}×`;
+                        updateMetricsUI(STATE.selectedObj);
+
+                        rulerDisplay.classList.remove('hidden');
+                        rulerVal.innerText = `1-HAND ZOOM: ${newScale.toFixed(2)}×`;
+                    }
+                }
+            }
+        }
+    }
+
     // PHASE 4: Primary Gesture State Machine
-    if (!isTwoHand) {
+    if (!isTwoHand && STATE.gesture !== 'SINGLE_PINCH_ZOOM') {
         if (STATE.isPinching) {
             STATE.gesture = 'PINCH';
             if (STATE.selectedShape === 'DRAW' && !STATE.hoveredUIElement) {
                 if (STATE.mode !== 'DRAWING') {
                     STATE.mode = 'DRAWING';
                 }
-            } else if (!STATE.hoveredUIElement) {
+            } else if (STATE.selectedShape !== 'SELECT' && !STATE.hoveredUIElement) {
                 spawnShapePrimitive(STATE.selectedShape, index);
                 STATE.isPinching = false;
+            } else if (STATE.selectedShape === 'SELECT' && !STATE.hoveredUIElement) {
+                // Try selecting target shape under index finger
+                selectNearestObject(index);
             }
         } else if (isGrabbed) {
             STATE.gesture = 'GRAB';
@@ -370,7 +413,6 @@ function onHandsResults(results) {
         } else {
             STATE.gesture = 'OPEN';
             if (STATE.mode === 'DRAWING') finalizeDrawing();
-            if (STATE.mode === 'GRABBED') unselectObject();
             if (!STATE.isDraggingObj) STATE.mode = 'IDLE';
         }
     }
@@ -554,7 +596,7 @@ function createMaterial(matType) {
 }
 
 /**
- * SECTION 4: SPATIAL RAYCASTING & AUTO-COMPLETE GEOMETRIC FIGURES
+ * SECTION 4: SPATIAL RAYCASTING & SINGLE ACTIVE OBJECT ISOLATION
  */
 function getSpatialPoint(lm) {
     if (!lm) return null;
@@ -644,6 +686,7 @@ function selectNearestObject(indexLm) {
     if (closest) selectObject(closest);
 }
 
+// IRON MAN SINGLE ACTIVE OBJECT FOCUS
 function selectObject(obj) {
     if (STATE.selectedObj && STATE.selectedObj !== obj) {
         unselectObject();
@@ -683,9 +726,6 @@ function unselectObject() {
     updateMetricsUI(null);
 }
 
-/**
- * AUTO-COMPLETE GEOMETRIC FIGURES IN FREEHAND DRAWING
- */
 function finalizeDrawing() {
     if (STATE.currentLine && STATE.linePoints.length >= 6) {
         const pts = [];
@@ -697,20 +737,16 @@ function finalizeDrawing() {
         const endPt = pts[pts.length - 1];
         const distStartEnd = startPt.distanceTo(endPt);
 
-        // Compute Bounding Box & Centroid of drawn path
         const bbox = new THREE.Box3().setFromPoints(pts);
         const center = new THREE.Vector3();
         bbox.getCenter(center);
         const size = new THREE.Vector3();
         bbox.getSize(size);
 
-        // Remove un-finalized raw line
         scene.remove(STATE.currentLine);
         STATE.currentLine.geometry.dispose();
 
-        // Check if path forms a closed / near-closed loop (dist < 0.65u)
         if (distStartEnd < 0.65 || pts.length > 25) {
-            // Calculate radial distances from center to assess circularity
             const radii = pts.map(p => p.distanceTo(center));
             const avgRadius = radii.reduce((a, b) => a + b, 0) / radii.length;
             const radiusVariance = radii.reduce((acc, r) => acc + Math.abs(r - avgRadius), 0) / radii.length;
@@ -718,14 +754,12 @@ function finalizeDrawing() {
 
             let completedMesh;
             if (varianceRatio < 0.28) {
-                // AUTO-COMPLETE AS SMOOTH SPHERE / TUBE RING
                 const geo = new THREE.SphereGeometry(avgRadius, 32, 32);
                 const mat = createMaterial(STATE.selectedMaterial);
                 completedMesh = new THREE.Mesh(geo, mat);
                 completedMesh.userData = { shapeType: 'Auto-Sphere', isPrimitive: true };
                 playSound('autocomplete');
             } else {
-                // AUTO-COMPLETE AS SMOOTH CUBE / BOUNDING MESH
                 const maxDim = Math.max(size.x, size.y, size.z, 0.4);
                 const geo = new THREE.BoxGeometry(maxDim, maxDim, maxDim);
                 const mat = createMaterial(STATE.selectedMaterial);
@@ -740,7 +774,6 @@ function finalizeDrawing() {
             selectObject(completedMesh);
 
         } else {
-            // OPEN CURVE: Apply Smooth Catmull-Rom Path Filter
             const curve = new THREE.CatmullRomCurve3(pts);
             const smoothPts = curve.getPoints(64);
             const geo = new THREE.BufferGeometry().setFromPoints(smoothPts);
@@ -834,7 +867,7 @@ function setupMouseInteractions() {
             STATE.isDraggingObj = true;
             orbitControls.enabled = false;
             activePointerDown = true;
-        } else if (STATE.selectedShape !== 'DRAW') {
+        } else if (STATE.selectedShape !== 'DRAW' && STATE.selectedShape !== 'SELECT') {
             spawnShapePrimitive(STATE.selectedShape, e);
         } else {
             unselectObject();
@@ -867,7 +900,7 @@ function setupMouseInteractions() {
         if (STATE.selectedObj) {
             e.preventDefault();
             const delta = e.deltaY < 0 ? 0.1 : -0.1;
-            const newScale = Math.max(0.2, Math.min(3.0, STATE.selectedObj.scale.x + delta));
+            const newScale = Math.max(0.2, Math.min(5.0, STATE.selectedObj.scale.x + delta));
             STATE.selectedObj.scale.set(newScale, newScale, newScale);
             if (STATE.selectionBox) STATE.selectionBox.update();
             scaleSlider.value = newScale;
@@ -949,7 +982,7 @@ function computeMeshMetrics(geo, type, size) {
 }
 
 /**
- * SECTION 7: ANIMATION LOOP & TONY STARK 6-DOF HAND CONTROL
+ * SECTION 7: ANIMATION LOOP & EXCLUSIVE ACTIVE OBJECT FOCUS
  */
 function animate() {
     requestAnimationFrame(animate);
@@ -963,6 +996,7 @@ function animate() {
         STATE.selectionBox.update();
     }
 
+    // EXCLUSIVE ACTIVE TARGET OBJECT MANIPULATION (TONY STARK ISOLATION)
     if (STATE.mode === 'GRABBED' && STATE.selectedObj && STATE.landmarks[0]) {
         const primaryLm = STATE.landmarks[0];
         const index = primaryLm[8];
@@ -971,11 +1005,13 @@ function animate() {
         const pinky = primaryLm[20];
         const thumb = primaryLm[4];
 
+        // 1. Position Translation on Active Object
         const targetPos = getSpatialPoint(index);
         if (targetPos) {
             STATE.selectedObj.position.lerp(targetPos, 0.22);
         }
 
+        // 2. 6-DOF Wrist/Palm Orientation on Active Object ONLY
         const pitchAngle = (middle.y - wrist.y) * 4.0;
         const yawAngle = -(index.x - pinky.x) * 4.0;
         const rollAngle = Math.atan2(thumb.y - pinky.y, thumb.x - pinky.x);
@@ -987,7 +1023,8 @@ function animate() {
         updateMetricsUI(STATE.selectedObj);
     }
 
-    if (STATE.mode === 'DRAWING' && STATE.landmarks[0]) {
+    // 3D Freehand Drawing Logic (ONLY active in explicit DRAW mode)
+    if (STATE.mode === 'DRAWING' && STATE.selectedShape === 'DRAW' && STATE.landmarks[0]) {
         prompt.classList.remove('hidden');
         const pt = getSpatialPoint(STATE.landmarks[0][8]);
 
@@ -1025,7 +1062,6 @@ function animate() {
 function setupUIHandlers() {
     initAudio();
 
-    // Panel Collapse Toggle Buttons
     document.querySelectorAll('.btn-toggle-panel').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const panel = document.getElementById(e.currentTarget.dataset.target);
@@ -1036,7 +1072,6 @@ function setupUIHandlers() {
         });
     });
 
-    // Gesture Help Guide Modal Handlers
     const guideModal = document.getElementById('gesture-guide-modal');
     document.getElementById('btn-guide-toggle').onclick = () => {
         guideModal.classList.remove('hidden');
@@ -1046,7 +1081,6 @@ function setupUIHandlers() {
         guideModal.classList.add('hidden');
     };
 
-    // Shape Selection
     document.querySelectorAll('.tool-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1057,7 +1091,6 @@ function setupUIHandlers() {
         });
     });
 
-    // Material Selection
     document.querySelectorAll('.mat-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
@@ -1072,7 +1105,6 @@ function setupUIHandlers() {
         });
     });
 
-    // GUI Transform Controls
     scaleSlider.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         scaleVal.innerText = `${val.toFixed(1)}×`;
@@ -1138,11 +1170,11 @@ function deleteSelectedObject() {
 
 function updateUI(conf) {
     uiGesture.innerText = STATE.gesture;
-    uiMode.innerText = `MODE: ${STATE.mode}`;
+    uiMode.innerText = `MODE: ${STATE.selectedShape}`;
 
     if (STATE.gesture === 'PINCH') uiGesture.style.color = '#ffaa00';
     else if (STATE.gesture === 'GRAB') uiGesture.style.color = '#ff3366';
-    else if (STATE.gesture === 'TWO_HAND' || STATE.gesture === 'DUAL_PINCH_ZOOM') uiGesture.style.color = '#00ccff';
+    else if (STATE.gesture === 'TWO_HAND' || STATE.gesture === 'DUAL_PINCH_ZOOM' || STATE.gesture === 'SINGLE_PINCH_ZOOM') uiGesture.style.color = '#00ccff';
     else uiGesture.style.color = '#00ff88';
 
     const pct = Math.min(100, Math.round(conf * 100));
